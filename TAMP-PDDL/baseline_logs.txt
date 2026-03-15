@@ -1,0 +1,78 @@
+[2025-12-03 18:24:07] Episode 1: FAILURE | Time: 2.85s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 18:24:27] Episode 1: FAILURE | Time: 2.38s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 18:24:42] Episode 1: FAILURE | Time: 2.31s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 19:55:39] Episode 1: FAILURE | Time: 2.60s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 19:55:51] Episode 2: FAILURE | Time: 2.39s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 19:56:03] Episode 3: FAILURE | Time: 2.32s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 19:56:14] Episode 4: FAILURE | Time: 2.47s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+--------------------------------------------------
+[2025-12-03 20:32:57] Episode 1: FAILURE | Time: 2.74s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_1.log
+--------------------------------------------------
+[2025-12-03 20:33:08] Episode 2: FAILURE | Time: 2.14s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_2.log
+--------------------------------------------------
+[2025-12-03 20:33:19] Episode 3: FAILURE | Time: 2.37s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_3.log
+--------------------------------------------------
+[2025-12-03 20:33:31] Episode 4: FAILURE | Time: 2.64s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_4.log
+--------------------------------------------------
+[2025-12-03 20:33:44] Episode 5: FAILURE | Time: 2.91s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_5.log
+--------------------------------------------------
+[2025-12-03 20:33:55] Episode 6: FAILURE | Time: 2.37s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_6.log
+--------------------------------------------------
+[2025-12-03 20:34:07] Episode 7: FAILURE | Time: 2.75s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_7.log
+--------------------------------------------------
+[2025-12-03 20:34:19] Episode 8: FAILURE | Time: 2.75s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_8.log
+--------------------------------------------------
+[2025-12-03 20:34:31] Episode 9: FAILURE | Time: 2.62s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_9.log
+--------------------------------------------------
+[2025-12-03 20:34:43] Episode 10: FAILURE | Time: 2.41s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_plans/run_10.log
+--------------------------------------------------

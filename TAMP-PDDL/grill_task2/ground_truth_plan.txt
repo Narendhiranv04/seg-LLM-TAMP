@@ -1,0 +1,88 @@
+; Ground Truth PDDL Action Sequence
+; Grill Long-Horizon Task
+
+; ============================================
+; TASK 1: Pick steak from table -> grill-top
+; ============================================
+(move home hover_pick_steak)
+(pick steak table)
+(move hover_pick_steak hover_place_steak_grill)
+(place steak grill-top)
+(move hover_place_steak_grill home)
+
+; ============================================
+; TASK 2: Pick chicken from table -> grill-top
+; ============================================
+(move home hover_pick_chicken)
+(pick chicken table)
+(move hover_pick_chicken hover_place_chicken_grill)
+(place chicken grill-top)
+(move hover_place_chicken_grill home)
+
+; ============================================
+; TASK 3: Close grill lid
+; ============================================
+(move home hover_grasp_grill_lid_open)
+(grasp-lid grill_lid)
+(close-grill grill_lid)
+(release-lid grill_lid)
+(move hover_release_grill_lid home)
+
+; ============================================
+; TASK 4: Pick plate -> box-top
+; NOTE: If your domain uses a different region name, replace box-top.
+; ============================================
+(move home hover_pick_plate)
+(pick plate dish_rack)
+(move hover_pick_plate hover_place_plate_box)
+(place plate box-top)
+(move hover_place_plate_box home)
+
+; ============================================
+; TASK 5: Open grill lid
+; ============================================
+(move home hover_grasp_grill_lid_closed)
+(grasp-lid grill_lid)
+(open-grill grill_lid)
+(release-lid grill_lid)
+(move hover_release_grill_lid home)
+
+; ============================================
+; TASK 6: Pick steak from grill-top -> plate-top
+; ============================================
+(move home hover_pick_steak_grill)
+(pick steak grill-top)
+(move hover_pick_steak_grill hover_place_steak_plate)
+(place steak plate-top)
+(move hover_place_steak_plate home)
+
+; ============================================
+; TASK 7: Pick chicken from grill-top -> plate-top
+; ============================================
+(move home hover_pick_chicken_grill)
+(pick chicken grill-top)
+(move hover_pick_chicken_grill hover_place_chicken_plate)
+(place chicken plate-top)
+(move hover_place_chicken_plate home)
+
+; ============================================
+; TASK 8: Close grill lid (final)
+; ============================================
+(move home hover_grasp_grill_lid_open_final)
+(grasp-lid grill_lid)
+(close-grill grill_lid)
+(release-lid grill_lid)
+(move hover_release_grill_lid_final home)
+
+; ============================================
+; SUMMARY
+; ============================================
+; Task 1: 5 actions (steak table -> grill-top)
+; Task 2: 5 actions (chicken table -> grill-top)
+; Task 3: 5 actions (close grill)
+; Task 4: 5 actions (plate dish_rack -> box-top)
+; Task 5: 5 actions (open grill)
+; Task 6: 5 actions (steak grill-top -> plate-top)
+; Task 7: 5 actions (chicken grill-top -> plate-top)
+; Task 8: 5 actions (final close grill)
+; TOTAL: 40 actions

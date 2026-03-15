@@ -1,0 +1,1 @@
+move -> pick -> move -> move -> place -> open-lid -> move -> move -> pick -> place

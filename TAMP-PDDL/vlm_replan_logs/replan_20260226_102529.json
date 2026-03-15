@@ -1,0 +1,124 @@
+{
+  "goal": "Keep all groceries in cupboard and all mugs on table",
+  "success": false,
+  "total_cycles": 4,
+  "total_replans": 3,
+  "total_actions_completed": 3,
+  "completed_actions": [
+    "pick(mug_box)",
+    "place(mug_box, table)",
+    "open-lid(box_lid)"
+  ],
+  "cycles": [
+    {
+      "cycle_number": 1,
+      "is_replan": false,
+      "plan": [
+        "pick(mug_inside_box)",
+        "place(mug_inside_box, table)",
+        "open-lid(box_lid)",
+        "pick(mug_box)",
+        "place(mug_box, table)",
+        "pick(mug_cupboard)",
+        "place(mug_cupboard, table)",
+        "pick(soup)",
+        "place(soup, cupboard_boundary)",
+        "pick(mustard)",
+        "place(mustard, cupboard_boundary)",
+        "pick(spam)",
+        "place(spam, cupboard_boundary)",
+        "pick(sugar)",
+        "place(sugar, cupboard_boundary)",
+        "pick(crackers)",
+        "place(crackers, cupboard_boundary)"
+      ],
+      "completed_actions": [],
+      "failed_action": "pick(mug_inside_box)",
+      "error_message": "No PDDL plan found",
+      "success": false
+    },
+    {
+      "cycle_number": 2,
+      "is_replan": true,
+      "plan": [
+        "open-lid(box_lid)",
+        "pick(mug_inside_box)",
+        "place(mug_inside_box, table)",
+        "pick(mug_box)",
+        "place(mug_box, table)",
+        "pick(mug_cupboard)",
+        "place(mug_cupboard, table)",
+        "pick(soup)",
+        "place(soup, cupboard_boundary)",
+        "pick(mustard)",
+        "place(mustard, cupboard_boundary)",
+        "pick(spam)",
+        "place(spam, cupboard_boundary)",
+        "pick(sugar)",
+        "place(sugar, cupboard_boundary)",
+        "pick(crackers)",
+        "place(crackers, cupboard_boundary)"
+      ],
+      "completed_actions": [],
+      "failed_action": "open-lid(box_lid)",
+      "error_message": "Cannot open lid - mug_box is on top",
+      "success": false
+    },
+    {
+      "cycle_number": 3,
+      "is_replan": true,
+      "plan": [
+        "pick(mug_box)",
+        "place(mug_box, table)",
+        "open-lid(box_lid)",
+        "pick(mug_inside_box)",
+        "place(mug_inside_box, table)",
+        "pick(mug_cupboard)",
+        "place(mug_cupboard, table)",
+        "pick(soup)",
+        "place(soup, cupboard_boundary)",
+        "pick(mustard)",
+        "place(mustard, cupboard_boundary)",
+        "pick(spam)",
+        "place(spam, cupboard_boundary)",
+        "pick(sugar)",
+        "place(sugar, cupboard_boundary)",
+        "pick(crackers)",
+        "place(crackers, cupboard_boundary)"
+      ],
+      "completed_actions": [
+        "pick(mug_box)",
+        "place(mug_box, table)",
+        "open-lid(box_lid)"
+      ],
+      "failed_action": "pick(mug_inside_box)",
+      "error_message": "Object 'mug4' didn't move (displacement: 0.000m)",
+      "success": false
+    },
+    {
+      "cycle_number": 4,
+      "is_replan": true,
+      "plan": [
+        "pick(mug4)",
+        "place(mug4, table)",
+        "pick(mug_cupboard)",
+        "place(mug_cupboard, table)",
+        "pick(soup)",
+        "place(soup, cupboard_boundary)",
+        "pick(mustard)",
+        "place(mustard, cupboard_boundary)",
+        "pick(spam)",
+        "place(spam, cupboard_boundary)",
+        "pick(sugar)",
+        "place(sugar, cupboard_boundary)",
+        "pick(crackers)",
+        "place(crackers, cupboard_boundary)"
+      ],
+      "completed_actions": [],
+      "failed_action": "pick(mug4)",
+      "error_message": "Object 'mug4' didn't move (displacement: 0.000m)",
+      "success": false
+    }
+  ],
+  "failure_reason": "Max replans exceeded"
+}

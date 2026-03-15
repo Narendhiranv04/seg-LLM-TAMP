@@ -1,0 +1,55 @@
+[2025-12-03 22:59:01] Episode 1: FAILURE | Time: 2.42s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-03 23:36:54] Episode 1: FAILURE | Time: 2.05s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-03 23:37:54] Episode 1: FAILURE | Time: 1.96s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-03 23:42:03] Episode 1: FAILURE | Time: 1.88s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 00:50:59] Episode 1: SUCCESS | Time: 1.27s
+  Plan: move -> open-lid -> move -> pick -> move -> place -> move -> move -> pick -> place
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 00:53:08] Episode 1: FAILURE | Time: 0.00s
+  Reason: Setup/Planning Error: Undefined constant box-top
+  Plan: N/A
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 00:55:44] Episode 1: FAILURE | Time: 0.00s
+  Reason: Setup/Planning Error: Undefined constant box-top
+  Plan: N/A
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 00:57:11] Episode 1: FAILURE | Time: 0.07s
+  Reason: No Plan Found (Timeout/Infeasible)
+  Plan: None
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 01:03:03] Episode 1: SUCCESS | Time: 1.39s
+  Plan: move -> pick -> move -> move -> place -> open-lid -> move -> move -> pick -> place
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 01:18:46] Episode 1: SUCCESS | Time: 1.53s
+  Plan: move -> pick -> move -> move -> place -> open-lid -> move -> move -> pick -> place
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 02:41:07] Episode 1: SUCCESS | Time: 1.26s
+  Plan: move -> pick -> move -> move -> place -> open-lid -> move -> move -> pick -> place
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------
+[2025-12-04 02:56:12] Episode 1: SUCCESS | Time: 1.29s
+  Plan: move -> pick -> move -> move -> place -> open-lid -> move -> move -> pick -> place
+  Detailed Log: baseline_with_rules_plans/run_1.log
+--------------------------------------------------

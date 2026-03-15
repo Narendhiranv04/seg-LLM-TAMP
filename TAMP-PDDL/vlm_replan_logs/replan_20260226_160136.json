@@ -1,0 +1,28 @@
+{
+  "goal": "Move all mugs on table and all groceries into the cupboard",
+  "success": false,
+  "total_cycles": 1,
+  "total_replans": 0,
+  "total_actions_completed": 0,
+  "completed_actions": [],
+  "cycles": [
+    {
+      "cycle_number": 1,
+      "is_replan": false,
+      "plan": [
+        "open-lid(box_lid)",
+        "pick(mug_box)",
+        "place(mug_box, cupboard_boundary)",
+        "pick(mugar_table)",
+        "place(mugar_table, cupboard_boundary)",
+        "pick(muger_cup_board)",
+        "place(muger_cupboard, cup_board_boundary)"
+      ],
+      "completed_actions": [],
+      "failed_action": "open-lid(box_lid)",
+      "error_message": "Cannot open lid - mug_box is on top",
+      "success": false
+    }
+  ],
+  "failure_reason": "Replan failed"
+}
