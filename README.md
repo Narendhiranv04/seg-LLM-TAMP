@@ -28,6 +28,8 @@ cat safe_publish_work.tar.zst.part* > safe_publish_work.tar.zst
 tar --zstd -xf safe_publish_work.tar.zst
 ```
 
+Refer to 'https://github.com/mechapuru/rlbench_long_horizon/tree/naren/pipeline/kitchen_long_horizon_pipeline' for all file explanations
+
 ## Main Run Commands
 
 Most runs assume:
@@ -36,22 +38,10 @@ Most runs assume:
 cd TAMP-PDDL
 ```
 
-Ground-truth orchestrator:
-
-```bash
-python orchestrator.py
-```
-
 Segmentation orchestrator:
 
 ```bash
 python run_segmentation_orchestrator.py
-```
-
-Real-mask segmentation run:
-
-```bash
-python run_with_segmentation.py
 ```
 
 Live segmentation:
