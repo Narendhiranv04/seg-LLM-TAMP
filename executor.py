@@ -19,7 +19,7 @@ import numpy as np
 from pddlstream.algorithms.meta import solve
 from pddlstream.language.constants import And, PDDLProblem
 
-from llm_pipeline.types import DirectAction, FailureEvent
+from llm_pipeline.pipeline_types import DirectAction, FailureEvent
 from vlm_pipeline.vlm_executor_v2 import (
     VLMExecutorV2,
     _normalize_segments,
@@ -846,4 +846,3 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
 
         self._manual_hold_context = None
         return True, 'Success'
-

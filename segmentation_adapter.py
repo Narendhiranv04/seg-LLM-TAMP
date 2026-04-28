@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from llm_pipeline.executable_symbols import RuntimeSymbolRegistry, build_runtime_symbol_registry
-from llm_pipeline.types import SegmentationObjectEvidence, SegmentationSnapshot
+from llm_pipeline.pipeline_types import SegmentationObjectEvidence, SegmentationSnapshot
 
 try:
     from segmentation_object_detector import SegmentationObjectDetector

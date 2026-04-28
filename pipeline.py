@@ -12,7 +12,7 @@ from llm_pipeline.pipeline import (
 )
 
 # Also re-export common types for downstream scripts
-from llm_pipeline.types import (
+from llm_pipeline.pipeline_types import (
     SceneState,
     PromptBundle,
     DirectAction,
