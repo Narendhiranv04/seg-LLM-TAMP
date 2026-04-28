@@ -1,0 +1,21 @@
+CORRECT example of picking and placing one object:
+move
+pick(object1)
+move
+place(object1, region1)
+
+WRONG example - picking one object but placing a different one:
+move
+pick(object1)
+move
+place(object2, region1)
+This is wrong because you must place the same object you picked. You cannot pick object1 and then place object2.
+
+CORRECT example of clearing an obstacle before opening:
+If an object1 is on top of object2, move object1 somewhere else first, then try opening object2.
+move
+pick(object1)
+move
+place(object1, region1)
+move
+open(object2)
