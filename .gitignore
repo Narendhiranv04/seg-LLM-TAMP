@@ -1,0 +1,56 @@
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.env.*
+
+# Logs and one-off run output
+*.log
+*.stdout.log
+*.stderr.log
+trial_output.log
+baseline_logs.txt
+baseline_with_rules_logs.txt
+level1_fix_run.log
+
+# Experiment and planner outputs
+VLM_outputs/
+ablation_results/
+baseline_plans/
+baseline_with_rules_plans/
+demo_logs/
+evaluation_results/
+llm_pipeline/results/
+experiments/results/
+experiments/statistics/
+experiments/temp/
+statistics/
+temp/
+vlm_pipeline_logs/
+vlm_replan_logs/
+
+# Generated video, segmentation, and tracking artifacts
+demo_videos/
+orchestrator_videos*/
+segmentation_videos*/
+segmentation_output/
+tracker_output/
+variation_*/orchestrator_videos/
+variation_*/segmentation_videos_live_seg/
+*.avi
+*.mov
+*.mp4
+
+# Local screenshots and accidental files
+Screenshot_*.png
+=*
+
+# Build artifacts inside vendored planners/dependencies
+pddlstream/downward/builds/
+*.o
+*.so
