@@ -19,6 +19,16 @@ DEFAULT_OBJECT_ORDER: Tuple[str, ...] = (
     "crackers",
     "box_lid",
 )
+GRILL_OBJECT_ORDER: Tuple[str, ...] = (
+    "steak",
+    "chicken",
+    "meat1",
+    "meat2",
+    "spam",
+    "plate",
+    "grill_lid",
+    "lid",
+)
 DEFAULT_REGION_ORDER: Tuple[str, ...] = (
     "table",
     "placement_boundary",
@@ -26,6 +36,14 @@ DEFAULT_REGION_ORDER: Tuple[str, ...] = (
     "cupboard_boundary_top",
     "box_boundary",
     "groceries_boundary",
+)
+GRILL_REGION_ORDER: Tuple[str, ...] = (
+    "grill-top",
+    "plate-top",
+    "plate_boundary",
+    "plate-boundary",
+    "plate",
+    "dish_rack",
 )
 EXECUTABLE_OBJECTS: Tuple[str, ...] = DEFAULT_OBJECT_ORDER
 EXECUTABLE_REGIONS: Tuple[str, ...] = DEFAULT_REGION_ORDER
@@ -84,22 +102,38 @@ def _iter_unique_scene_objects(env):
         yield handle, obj
 
 
-def _objects_from_detected(detected_objects=None) -> Tuple[str, ...]:
-    """Build object list from mask-detected objects (intersection with class vocab).
+def _objects_from_env(env) -> Tuple[str, ...]:
+    if env is None:
+        return ()
 
-    If detected_objects is provided, returns only those that appear in
-    DEFAULT_OBJECT_ORDER (intersection), preserving canonical order.
-    Falls back to the full DEFAULT_OBJECT_ORDER if nothing is provided.
-    """
+    names = []
+    for name in (getattr(env, "name_to_obj", {}) or {}).keys():
+        token = str(name).strip()
+        if token:
+            names.append(token)
+    return _dedupe_preserve_order(names)
+
+
+def _ordered_known_then_extras(items: Iterable[str], known_order: Tuple[str, ...]) -> Tuple[str, ...]:
+    item_set = {str(item).strip() for item in items if str(item).strip()}
+    ordered = [name for name in known_order if name in item_set]
+    extras = sorted(name for name in item_set if name not in set(known_order))
+    return _dedupe_preserve_order(ordered + extras)
+
+
+def _objects_from_detected(detected_objects=None, env=None) -> Tuple[str, ...]:
+    """Build object symbols from detector/env data with kitchen defaults as fallback."""
+    candidates = []
     if detected_objects is None:
-        return EXECUTABLE_OBJECTS
+        candidates.extend(_objects_from_env(env))
+    else:
+        candidates.extend(detected_objects)
+        candidates.extend(_objects_from_env(env))
 
-    detected_set = set(detected_objects)
-    # Intersection: only objects in BOTH the class vocab AND the masks
-    ordered = [name for name in DEFAULT_OBJECT_ORDER if name in detected_set]
-    # Include any extras from masks not in the default vocab
-    extras = sorted(name for name in detected_objects if name not in set(DEFAULT_OBJECT_ORDER))
-    return _dedupe_preserve_order(ordered + extras) or EXECUTABLE_OBJECTS
+    known_order = DEFAULT_OBJECT_ORDER + tuple(
+        name for name in GRILL_OBJECT_ORDER if name not in set(DEFAULT_OBJECT_ORDER)
+    )
+    return _ordered_known_then_extras(candidates, known_order) or EXECUTABLE_OBJECTS
 
 
 def _regions_from_env(env) -> Tuple[str, ...]:
@@ -107,13 +141,11 @@ def _regions_from_env(env) -> Tuple[str, ...]:
         return EXECUTABLE_REGIONS
 
     region_map = getattr(env, "regions", {}) or {}
-    names = [name for name in DEFAULT_REGION_ORDER if name in region_map]
-    extras = sorted(
-        name
-        for name in region_map.keys()
-        if name not in set(DEFAULT_REGION_ORDER) and name not in {"box-top", "box-inside", "shelf-lower"}
+    known_order = DEFAULT_REGION_ORDER + tuple(
+        name for name in GRILL_REGION_ORDER if name not in set(DEFAULT_REGION_ORDER)
     )
-    return _dedupe_preserve_order(names + extras) or EXECUTABLE_REGIONS
+    names = _ordered_known_then_extras(region_map.keys(), known_order)
+    return names or EXECUTABLE_REGIONS
 
 
 def build_runtime_symbol_registry(env=None, detected_objects=None, context_aggregator=None) -> RuntimeSymbolRegistry:
@@ -122,13 +154,12 @@ def build_runtime_symbol_registry(env=None, detected_objects=None, context_aggre
     Args:
         env: Environment (used for regions via env.regions).
         detected_objects: List of object names discovered from segmentation masks.
-            If provided, the object list is the intersection of this with DEFAULT_OBJECT_ORDER.
-            If None, falls back to DEFAULT_OBJECT_ORDER.
+            If provided, these names are retained and ordered before env extras.
+            If no detector/env data is available, falls back to kitchen defaults.
     """
     del context_aggregator
     return RuntimeSymbolRegistry(
         actions=ACTION_SYMBOLS,
-        objects=_objects_from_detected(detected_objects),
+        objects=_objects_from_detected(detected_objects, env=env),
         regions=_regions_from_env(env),
     )
-
