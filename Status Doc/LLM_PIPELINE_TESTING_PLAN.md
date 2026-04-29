@@ -17,6 +17,16 @@ Can this module reproduce or explain the ground-truth route without model uncert
 
 ## Ground-Truth Baseline Status
 
+Concrete commands:
+
+```bash
+# Single GT trial with GUI for manual inspection.
+python3 run_ground_truth_trial.py --variant K1 --gui --output outputs/gt/K1_trial1.json
+
+# Repeat all canonical GT variants headless.
+python3 run_ground_truth_benchmark.py --variants K1,K2,K3,G1,G2,G3 --trials 1 --output-root outputs/gt
+```
+
 ### Kitchen
 
 Recent smoke tests:
@@ -93,6 +103,20 @@ Current harness:
 llm_pipeline/debug_execution.py
 ```
 
+Concrete command:
+
+```bash
+python3 llm_pipeline/debug_execution.py
+```
+
+Current limitation:
+
+```text
+This harness is still K2-oriented and should be refactored into selectable
+cases before it can cover kitchen_k1_prefix, kitchen_k1_box_only, grill_g1_full,
+and grill_g3_full cleanly.
+```
+
 Goal:
 
 - Use a mock planner or direct action list.
@@ -117,6 +141,12 @@ success/failure profile as GT.
 ```
 
 ### Phase 2: Executor Dispatch and Bundling Tests
+
+Concrete command:
+
+```text
+No dedicated command yet.
+```
 
 Goal:
 
@@ -145,6 +175,12 @@ Each action pair dispatches to the expected kitchen or grill primitive path.
 
 ### Phase 3: Parser With Hand-Written GT Text
 
+Concrete command:
+
+```text
+No dedicated command yet.
+```
+
 Goal:
 
 - Verify that GT-style text output can be parsed into `DirectAction`s.
@@ -168,6 +204,12 @@ Unknown aliases fail early and clearly.
 
 ### Phase 4: Failure Checker Without LLM
 
+Concrete command:
+
+```text
+No dedicated command yet.
+```
+
 Goal:
 
 - Use fake or captured snapshots to test failure classification.
@@ -187,6 +229,26 @@ Failures are classified accurately enough to support future replanning.
 ```
 
 ### Phase 5: Scene State / Segmentation Snapshot
+
+Concrete commands:
+
+```bash
+# Kitchen pass.
+python3 llm_pipeline/debug_state_builder.py --variant K1 --skip-prompt --json
+python3 llm_pipeline/debug_state_builder.py --variant K2 --skip-prompt --json
+python3 llm_pipeline/debug_state_builder.py --variant K3 --skip-prompt --json
+
+# Grill pass.
+python3 llm_pipeline/debug_state_builder.py --variant G1 --skip-prompt --json
+python3 llm_pipeline/debug_state_builder.py --variant G2 --skip-prompt --json
+python3 llm_pipeline/debug_state_builder.py --variant G3 --skip-prompt --json
+```
+
+Output:
+
+```text
+Reports are saved under Status Doc/scene_state_reports/.
+```
 
 Goal:
 
@@ -211,6 +273,12 @@ Visible objects, regions, and containment facts match what GT assumes.
 
 ### Phase 6: Prompt Builder With Frozen State
 
+Concrete command:
+
+```text
+No frozen-state replay command yet.
+```
+
 Goal:
 
 - Given a snapshot and goal, verify the generated prompt contains executable
@@ -224,6 +292,12 @@ Prompt includes enough information for a planner to choose the GT sequence.
 ```
 
 ### Phase 7: Mock Planner End-to-End
+
+Concrete command:
+
+```bash
+python3 llm_pipeline/debug_execution.py
+```
 
 Goal:
 
@@ -242,6 +316,23 @@ event, and failure reason correctly.
 
 ### Phase 8: Real LLM Plan-Only
 
+Concrete commands:
+
+```bash
+# Text-only load, prompt, and dry-run plan validation.
+python3 -m llm_pipeline.trial_runner --variant K1 --model <model_alias> --icl-mode zero_shot --preflight-only --output outputs/llm_preflight/K1.json
+
+# First-plan-only mode with execution and failure checks disabled.
+python3 -m llm_pipeline.trial_runner --variant K1 --model <model_alias> --icl-mode zero_shot --replan-mode off --output outputs/llm_plan_only/K1.json
+```
+
+Current limitation:
+
+```text
+The maintained llm_pipeline.trial_runner currently supports kitchen variants
+K1/K2/K3 only.
+```
+
 Goal:
 
 - Ask the real model for a plan.
@@ -257,6 +348,24 @@ The LLM can produce legal action names, object names, and region names.
 ### Phase 9: Real LLM With Execution
 
 Run only after non-LLM tests pass.
+
+Concrete commands:
+
+```bash
+# Single execution trial.
+python3 -m llm_pipeline.trial_runner --variant K1 --model <model_alias> --icl-mode zero_shot --gui --output outputs/llm_execution/K1_trial1.json
+
+# Batch execution over kitchen variants.
+python3 -m llm_pipeline.benchmark_runner --models <model_alias> --icl-modes zero_shot --variants K1,K2,K3 --trials 1 --output-root outputs/llm_benchmark
+```
+
+Current limitation:
+
+```text
+The maintained llm_pipeline execution runner currently supports kitchen variants
+K1/K2/K3 only. Grill execution should wait for a matching LLM runner or be tested
+through the mock/GT executor path first.
+```
 
 Recommended first execution scenes:
 
