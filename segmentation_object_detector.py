@@ -122,6 +122,13 @@ class SegmentationObjectDetector:
             'wrist': 'cam_wrist_mask',
             'front': 'cam_front_mask',
         }
+        env_cam_mapping = {
+            'left': ['left', 'cam_over_shoulder_left'],
+            'right': ['right', 'cam_over_shoulder_right'],
+            'overhead': ['overhead', 'cam_overhead'],
+            'wrist': ['wrist', 'cam_wrist'],
+            'front': ['front', 'cam_front'],
+        }
         
         for name in cam_names:
             # Try mask camera
@@ -131,8 +138,10 @@ class SegmentationObjectDetector:
                 self.cameras[name] = ('mask', mask_cam)
             except:
                 # Use regular camera with render mode switch
-                if name in self.env.cams:
-                    self.cameras[name] = ('render_mode', self.env.cams[name])
+                for env_cam_name in env_cam_mapping[name]:
+                    if env_cam_name in self.env.cams:
+                        self.cameras[name] = ('render_mode', self.env.cams[env_cam_name])
+                        break
 
     def _build_task_handle_mapping(self):
         """Map shape handles to canonical task objects via env object trees."""
