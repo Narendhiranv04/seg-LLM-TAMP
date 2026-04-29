@@ -385,14 +385,16 @@ hand-written sequences.
 
 ## Immediate Next Step
 
-Refactor or replace `llm_pipeline/debug_execution.py` into a selectable
-hand-script runner for:
+Fix the scene-state generator through manual verification, starting with the
+kitchen domain.
 
 ```text
-kitchen_k1_prefix
-kitchen_k1_box_only
-grill_g1_full
-grill_g3_full
+1. Open the base static kitchen scenes in CoppeliaSim.
+2. Compare K1/K2/K3 manually against saved debug_state_builder.py reports.
+3. Correct scene-state generation for visible objects, regions, and containment.
+4. After static snapshots are reliable, test progression/dynamic snapshots after
+   state changes such as opening the box or moving objects.
 ```
 
-The first target should be executor parity, not LLM planning quality.
+Executor parity with hand-written GT remains the next pipeline-level target
+after scene-state accuracy is corrected.
