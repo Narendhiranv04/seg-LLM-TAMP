@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import importlib
 import json
 import os
@@ -17,6 +18,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from evaluation.canonical_variants import get_variant_spec  # noqa: E402
 from llm_pipeline.pipeline import LLMPipelineConfig, LLMOnlyReplanningPipeline  # noqa: E402
+
+
+DEFAULT_REPORT_DIR = REPO_ROOT / "Status Doc" / "scene_state_reports"
 
 
 class NoOpPlanner:
@@ -94,6 +98,137 @@ def _state_summary(state) -> dict[str, Any]:
     }
 
 
+def _format_list(values: list[str]) -> str:
+    return ", ".join(values) if values else "(none)"
+
+
+def _format_scene_report(
+    *,
+    variant_id: str,
+    task_family: str,
+    scene_path: str,
+    headless: bool,
+    settle_steps: int,
+    summary: dict[str, Any],
+) -> str:
+    snapshot = summary["snapshot"] or {}
+    object_evidence = snapshot.get("object_evidence", {})
+    visible_objects = summary["visible_objects"]
+    visible_regions = snapshot.get("visible_regions", [])
+
+    if not visible_objects:
+        result = "FAIL"
+        result_note = "No visible objects were detected."
+    elif any(len(evidence.get("mask_regions", [])) != 1 for evidence in object_evidence.values()):
+        result = "PARTIAL"
+        result_note = "Objects were detected, but one or more objects have broad or missing region evidence."
+    else:
+        result = "PASS"
+        result_note = "Objects were detected with single-region evidence."
+
+    lines = [
+        f"# Scene State Report: {variant_id}",
+        "",
+        "## Run",
+        "",
+        f"- Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"- Variant: {variant_id}",
+        f"- Task family: {task_family}",
+        f"- Scene: `{scene_path}`",
+        f"- Headless: {headless}",
+        f"- Settle steps: {settle_steps}",
+        f"- Result: {result}",
+        f"- Summary: {result_note}",
+        "",
+        "## Detected State",
+        "",
+        f"- Visible objects: {_format_list(visible_objects)}",
+        f"- Newly visible objects: {_format_list(snapshot.get('newly_visible_objects', []))}",
+        f"- Visible regions: {_format_list(visible_regions)}",
+        f"- Supported regions: {_format_list(snapshot.get('supported_regions', []))}",
+        f"- Pose map objects: {_format_list(summary['pose_map_keys'])}",
+        f"- Gripper: {summary['gripper_state'].get('status', 'unknown')}",
+        "",
+        "## Object Evidence",
+        "",
+    ]
+
+    if object_evidence:
+        lines.extend([
+            "| Object | Regions | Cameras | Pixels | Region votes |",
+            "| --- | --- | --- | ---: | --- |",
+        ])
+        for name in sorted(object_evidence):
+            evidence = object_evidence[name]
+            region_votes = ", ".join(
+                f"{region}: {votes:g}"
+                for region, votes in sorted(evidence.get("region_votes", {}).items())
+            )
+            lines.append(
+                "| "
+                f"{name} | "
+                f"{_format_list(evidence.get('mask_regions', []))} | "
+                f"{_format_list(evidence.get('camera_hits', []))} | "
+                f"{evidence.get('pixel_count', 0)} | "
+                f"{region_votes or '(none)'} |"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.extend([
+        "",
+        "## Review Notes",
+        "",
+    ])
+    if object_evidence:
+        for name in sorted(object_evidence):
+            evidence = object_evidence[name]
+            regions = evidence.get("mask_regions", [])
+            if len(regions) == 0:
+                lines.append(f"- {name}: no region evidence.")
+            elif len(regions) > 1:
+                lines.append(f"- {name}: multiple region candidates ({_format_list(regions)}).")
+        if lines[-1] == "":
+            lines.append("- No obvious region ambiguity in this snapshot.")
+    else:
+        lines.append("- No object evidence available.")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _write_reports(
+    *,
+    args: argparse.Namespace,
+    variant_id: str,
+    task_family: str,
+    scene_path: str,
+    summary: dict[str, Any],
+) -> tuple[Path, Path | None]:
+    output_dir = Path(args.output_dir).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = f"{timestamp}_{variant_id}_scene_state"
+    report_path = output_dir / f"{stem}.md"
+    json_path = output_dir / f"{stem}.json" if args.json else None
+
+    report = _format_scene_report(
+        variant_id=variant_id,
+        task_family=task_family,
+        scene_path=scene_path,
+        headless=args.headless,
+        settle_steps=args.settle_steps,
+        summary=summary,
+    )
+    report_path.write_text(report, encoding="utf-8")
+
+    if json_path is not None:
+        json_path.write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
+
+    return report_path, json_path
+
+
 def debug_state_recognition(args: argparse.Namespace) -> int:
     variant = get_variant_spec(args.variant)
     scene_path = str(Path(args.scene_path).resolve()) if args.scene_path else variant.scene_path
@@ -135,26 +270,7 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
         state = pipeline._build_scene_state()
         summary = _state_summary(state)
 
-        print("\n--- SCENE STATE SUMMARY ---")
-        print(f"Visible objects: {summary['visible_objects']}")
-        print(f"Valid regions: {summary['valid_regions']}")
-        print(f"Pose map keys: {summary['pose_map_keys']}")
-        print(f"Region map keys: {summary['region_map_keys']}")
-
         snapshot = summary["snapshot"] or {}
-        print(f"Visible regions: {snapshot.get('visible_regions', [])}")
-        print(f"Newly visible objects: {snapshot.get('newly_visible_objects', [])}")
-
-        print("\n--- OBJECT EVIDENCE ---")
-        object_evidence = snapshot.get("object_evidence", {})
-        if object_evidence:
-            for name, evidence in object_evidence.items():
-                print(
-                    f"{name}: regions={evidence['mask_regions']} "
-                    f"cameras={evidence['camera_hits']} pixels={evidence['pixel_count']}"
-                )
-        else:
-            print("(none)")
 
         if not args.skip_prompt:
             print("\n[Debug] Building prompt bundle through pipeline.context_builder...")
@@ -162,12 +278,23 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
             print("\n--- GENERATED USER PROMPT ---")
             print(bundle.user_prompt)
 
-        if args.json:
-            print("\n--- JSON SUMMARY ---")
-            print(json.dumps(summary, indent=2, sort_keys=True))
+        report_path, json_path = _write_reports(
+            args=args,
+            variant_id=variant.variant_id,
+            task_family=variant.task_family,
+            scene_path=scene_path,
+            summary=summary,
+        )
+        print(f"\n[Debug] Report written: {report_path}")
+        if json_path is not None:
+            print(f"[Debug] JSON written: {json_path}")
 
         if state.visible_objects:
-            print(f"\n[Debug] PASS: detected {len(state.visible_objects)} visible object(s).")
+            visible_regions = snapshot.get("visible_regions", [])
+            print(
+                f"\n[Debug] PASS: detected {len(state.visible_objects)} visible object(s), "
+                f"{len(visible_regions)} visible region(s)."
+            )
             return 0
 
         print("\n[Debug] FAIL: no visible objects detected.")
@@ -216,12 +343,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-prompt",
         action="store_true",
-        help="Only print state evidence; do not build the prompt bundle.",
+        help="Do not build the prompt bundle.",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Print a machine-readable JSON summary after the text summary.",
+        help="Save the machine-readable JSON summary next to the Markdown report.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=str(DEFAULT_REPORT_DIR),
+        help="Directory for saved Markdown and optional JSON reports.",
     )
     return parser.parse_args()
 
