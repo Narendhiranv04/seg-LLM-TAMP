@@ -189,7 +189,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--headless",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Run CoppeliaSim headless.",
     )
     parser.add_argument(
