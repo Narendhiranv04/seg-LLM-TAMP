@@ -28,6 +28,21 @@ class NoOpPlanner:
         return True
 
 
+class NoOpExecutor:
+    """Executor stub for recognition-only debug runs."""
+
+    held_object = None
+
+    def set_env(self, env) -> None:
+        self.env = env
+
+    def set_step_callback(self, callback) -> None:
+        self.step_callback = callback
+
+    def set_action_start_callback(self, callback) -> None:
+        self.action_start_callback = callback
+
+
 def _load_env(task_family: str, scene_path: str, headless: bool):
     os.environ["HEADLESS"] = "True" if headless else "False"
 
@@ -106,7 +121,7 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
             enable_vision=False,
             use_remote_planner=False,
         )
-        pipeline = LLMOnlyReplanningPipeline(config=config, planner=NoOpPlanner())
+        pipeline = LLMOnlyReplanningPipeline(config=config, planner=NoOpPlanner(), executor=NoOpExecutor())
         if not pipeline.initialize(env=env):
             print("[Debug] ERROR: pipeline.initialize() returned False")
             return 1

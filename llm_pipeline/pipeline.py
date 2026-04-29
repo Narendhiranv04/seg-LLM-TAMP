@@ -12,7 +12,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from llm_pipeline.catalog import resolve_llm_model
 from llm_pipeline.client import RemoteTextLLMPlanner
 from llm_pipeline.executable_symbols import build_runtime_symbol_registry
-from llm_pipeline.executor import DirectPrimitiveExecutor
 from llm_pipeline.failure_logic import SegmentationFirstFailureChecker, GeometricFailureChecker
 from llm_pipeline.planner import TextLLMPlanner
 from llm_pipeline.prompt_builder import TextOnlyContextBuilder
@@ -22,7 +21,6 @@ from llm_pipeline.pipeline_types import (
     DirectAction, FailureEvent, PlanResult, ICLMode, SceneState,
     BasePlanner, BaseContextBuilder
 )
-from vlm_pipeline.vlm_executor_v2 import ExecutorConfig
 
 # NEW Modular Components
 from llm_pipeline.geometric_builder import GeometricContextBuilder
@@ -195,6 +193,9 @@ class LLMOnlyReplanningPipeline:
             self.failure_checker.adapter = self.segmentation_adapter
 
         if self.executor is None:
+            from llm_pipeline.executor import DirectPrimitiveExecutor
+            from vlm_pipeline.vlm_executor_v2 import ExecutorConfig
+
             self.executor = DirectPrimitiveExecutor(
                 env=env,
                 config=ExecutorConfig(return_home_after_each_action=self.config.return_home_after_each_action),
