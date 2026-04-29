@@ -8,6 +8,14 @@ from pyrep.objects.shape import Shape
 from pyrep.objects.vision_sensor import VisionSensor
 from pyrep.const import ConfigurationPathAlgorithms
 from pyrep.backend import sim
+from llm_pipeline.region_aliases import (
+    BOX_INSIDE_FALLBACK_REGION,
+    BOX_LID_TOP_REGION,
+    BOX_STORAGE_REGION,
+    CUPBOARD_TARGET_REGIONS,
+    RegionAliasMap,
+    normalize_region_name,
+)
 
 DEFAULT_SCENE_FILE = os.path.join(os.path.dirname(__file__), "task1_variation1.ttt")
 SCENE_FILE = os.environ.get("KITCHEN_SCENE_FILE", DEFAULT_SCENE_FILE)
@@ -111,24 +119,25 @@ class RLBenchKitchenEnv:
             print("Warning: 'mug2' (box mug) not found in scene.")
 
         # Map region names to objects (only keep available regions)
-        self.regions = {}
+        self.regions = RegionAliasMap()
         if self.table is not None:
             self.regions['table'] = self.table
         if self.box is not None:
-            self.regions['box-top'] = self.box
-            self.regions['box-inside'] = self.box
+            self.regions[BOX_INSIDE_FALLBACK_REGION] = self.box
         if self.cupboard is not None:
-            self.regions['shelf-lower'] = self.cupboard
+            self.regions['cupboard_fallback'] = self.cupboard
         if self.groceries_boundary is not None:
             self.regions['groceries_boundary'] = self.groceries_boundary
         if self.placement_boundary is not None:
             self.regions['placement_boundary'] = self.placement_boundary
         if self.cupboard_boundary is not None:
-            self.regions['cupboard_boundary'] = self.cupboard_boundary
+            self.regions['cupboard_lower'] = self.cupboard_boundary
         if self.cupboard_boundary_top is not None:
-            self.regions['cupboard_boundary_top'] = self.cupboard_boundary_top
+            self.regions['cupboard_upper'] = self.cupboard_boundary_top
         if self.box_boundary is not None:
-            self.regions['box_boundary'] = self.box_boundary
+            self.regions[BOX_STORAGE_REGION] = self.box_boundary
+        if self.box_lid is not None:
+            self.regions[BOX_LID_TOP_REGION] = self.box_lid
 
         self.name_to_obj = {}
 
@@ -155,6 +164,12 @@ class RLBenchKitchenEnv:
         _register('crackers', self.cereal)
         _register('box_lid', self.box_lid)
         _register('box_base', self.box)
+        _register(BOX_STORAGE_REGION, self.box_boundary)
+        _register(BOX_LID_TOP_REGION, self.box_lid)
+        _register(BOX_INSIDE_FALLBACK_REGION, self.box)
+        _register('cupboard_lower', self.cupboard_boundary)
+        _register('cupboard_upper', self.cupboard_boundary_top)
+        _register('cupboard_fallback', self.cupboard)
 
         # Mug aliases
         _register('mug1', self.mug_table)
@@ -242,6 +257,7 @@ class RLBenchKitchenEnv:
             return None
 
     def get_object(self, name):
+        name = normalize_region_name(name)
         if name in self.name_to_obj:
             return self.name_to_obj[name]
         try:
@@ -351,6 +367,7 @@ class RLBenchKitchenEnv:
 
     def sample_stable_pose(self, obj, region_name):
         """Return a stable 7D pose (x,y,z,qx,qy,qz,qw) for obj in region."""
+        region_name = normalize_region_name(region_name)
         region = self.regions.get(region_name)
         if not region:
             print(f"Region {region_name} not found, returning current pose")
@@ -368,7 +385,7 @@ class RLBenchKitchenEnv:
         
         current_pose = obj.get_pose()
 
-        is_box_region = region_name in {"box-inside", "box_boundary"}
+        is_box_region = region_name in {BOX_INSIDE_FALLBACK_REGION, BOX_STORAGE_REGION}
         if is_box_region:
             # In boxes, keep a small padding and bias to free XY to avoid unnecessary planner failures.
             box_padding = float(os.environ.get("BOX_REGION_SAMPLE_PADDING", "0.015"))
@@ -467,7 +484,7 @@ class RLBenchKitchenEnv:
             sample_y = np.random.uniform(w_min_y + padding, w_max_y - padding)
 
             # Adjust Z based on region
-            if region_name == 'shelf-lower':
+            if region_name == 'cupboard_fallback':
                 sample_z = w_min_z + 0.01
             elif region_name == 'placement_boundary':
                 # For placement boundary, we want to be on the table surface.
@@ -673,7 +690,7 @@ class RLBenchKitchenEnv:
             return None
 
     def set_target_region(self, name):
-        self.target_region_name = name
+        self.target_region_name = normalize_region_name(name)
 
     def compute_pick_trajectory(self, obj, pose):
         """Return grasp, q_start, q_end, and trajectory for picking obj at pose."""
@@ -1027,8 +1044,9 @@ class RLBenchKitchenEnv:
         original_conf = self.get_robot_conf()
         try:
             # 1. Determine Strategy based on Region
-            is_cupboard = (region_name == 'cupboard_boundary') or (region_name == 'cupboard_boundary_top')
-            is_box_boundary = (region_name == 'box_boundary')
+            region_name = normalize_region_name(region_name)
+            is_cupboard = region_name in CUPBOARD_TARGET_REGIONS
+            is_box_boundary = region_name == BOX_STORAGE_REGION
             
             min_x, max_x, min_y, max_y, min_z, max_z = obj.get_bounding_box()
             top_z_local = max_z
@@ -1590,6 +1608,7 @@ class RLBenchKitchenEnv:
 
     def find_best_placement(self, obj, region_name, count=50):
         """Find a collision-free placement in region. Returns the first valid one found."""
+        region_name = normalize_region_name(region_name)
         region = self.regions.get(region_name)
         if not region:
             raise ValueError(f"Region {region_name} not found")
@@ -1615,7 +1634,7 @@ class RLBenchKitchenEnv:
         
         # Z height: Place on table surface if possible
         table = self.regions.get('table')
-        if region_name in ['cupboard_boundary', 'cupboard_boundary_top', 'box_boundary']:
+        if region_name in ['cupboard_lower', 'cupboard_upper', BOX_STORAGE_REGION]:
              place_z = rz + r_min_z + 0.005
         elif table:
              _, _, _, _, _, table_max_z = table.get_bounding_box()
@@ -1629,7 +1648,7 @@ class RLBenchKitchenEnv:
         # Minimum distance between placed objects
         MIN_PLACEMENT_DIST = 0.06  # 6cm apart
         
-        if region_name in ['box_boundary', 'box-inside', 'box-top']:
+        if region_name in [BOX_STORAGE_REGION, BOX_INSIDE_FALLBACK_REGION, BOX_LID_TOP_REGION]:
             margin_x = 0.045
             margin_y = 0.045
             num_slots = 3

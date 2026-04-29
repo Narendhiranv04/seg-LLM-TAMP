@@ -1,5 +1,12 @@
 from llm_pipeline.prompt_builder import TextOnlyContextBuilder
-from llm_pipeline.pipeline_types import SegmentationObjectEvidence, SegmentationSnapshot
+from llm_pipeline.pipeline_types import (
+    FailureEvent,
+    FailureSource,
+    FailureStage,
+    SceneState,
+    SegmentationObjectEvidence,
+    SegmentationSnapshot,
+)
 
 
 def _snapshot() -> SegmentationSnapshot:
@@ -16,7 +23,7 @@ def _snapshot() -> SegmentationSnapshot:
                 camera_pixels={'overhead': 16},
                 bbox={'overhead': (0.4000, 0.3000, 0.6000, 0.5000)},
                 centroid={'overhead': (0.5000, 0.4000)},
-                mask_regions=['box_boundary'],
+                mask_regions=['box_storage'],
                 newly_visible=True,
             ),
             'box_lid': SegmentationObjectEvidence(
@@ -27,37 +34,61 @@ def _snapshot() -> SegmentationSnapshot:
                 camera_pixels={'overhead': 20},
                 bbox={'overhead': (0.3000, 0.2000, 0.7000, 0.5200)},
                 centroid={'overhead': (0.5000, 0.3600)},
-                mask_regions=['box_boundary'],
+                mask_regions=['box_lid_top'],
             ),
         },
         gripper_evidence={},
-        supported_regions=['table', 'placement_boundary', 'cupboard_boundary', 'cupboard_boundary_top', 'box_boundary'],
-        visible_regions=['box_boundary'],
+        supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage'],
+        visible_regions=['box_storage'],
     )
+
+
+def _state(snapshot: SegmentationSnapshot, held_object=None) -> SceneState:
+    state = SceneState(
+        frame_index=snapshot.frame_index,
+        visible_objects=snapshot.visible_objects,
+        valid_regions=snapshot.supported_regions,
+        gripper_state={'status': 'holding' if held_object else 'empty', 'holding': held_object},
+    )
+    state._original_snapshot = snapshot
+    return state
 
 
 def test_prompt_bundle_stays_text_only() -> None:
     builder = TextOnlyContextBuilder()
+    failure = FailureEvent(
+        failure_id='placement_failed',
+        stage=FailureStage.AFTER_EXECUTION,
+        source=FailureSource.SEGMENTATION,
+        action='place(mug2, placement_boundary)',
+        evidence={},
+        message='failure_id=placement_failed',
+    )
     bundle = builder.build_bundle(
+        state=_state(_snapshot(), held_object='mug2'),
         goal_text='Move mug2 to placement_boundary.',
-        snapshot=_snapshot(),
         icl_mode='few_shot_shared_1',
-        failure_context='failure_id=placement_failed',
+        failure_event=failure,
         previous_actions=['move', 'pick(mug2)'],
-        held_object='mug2',
     )
     assert set(bundle.__dict__.keys()) == {
         'goal_text',
-        'observation_text',
-        'visible_objects_text',
+        'system_prompt',
+        'user_prompt',
+        'visible_objects',
+        'valid_regions',
+        'images',
+        'image_paths',
         'failure_context',
         'icl_mode',
         'previous_actions',
+        'metadata',
     }
-    assert not any('image' in key for key in bundle.__dict__)
+    assert bundle.images is None
+    assert bundle.image_paths is None
 
-    system_prompt = builder.build_system_prompt(bundle)
-    user_prompt = builder.build_user_prompt(bundle)
+    system_prompt = bundle.system_prompt
+    user_prompt = bundle.user_prompt
 
     assert 'SHARED FEW-SHOT EXEMPLAR' in system_prompt
     assert 'pick(mug2)' not in system_prompt
@@ -73,8 +104,8 @@ def test_prompt_bundle_stays_text_only() -> None:
     assert 'open(box_lid)' in user_prompt
     assert 'Return executable action lines only.' in user_prompt
     assert 'state_text' not in user_prompt
-    assert 'mask_regions=box_boundary' in user_prompt
-    assert 'visible_regions=box_boundary' in user_prompt
+    assert 'mask_regions=box_storage' in user_prompt
+    assert 'visible_regions=box_storage' in user_prompt
     assert 'box_lid_state' not in user_prompt
     assert 'region_hint=' not in user_prompt
 
@@ -82,11 +113,11 @@ def test_prompt_bundle_stays_text_only() -> None:
 def test_zero_shot_system_prompt_has_no_shared_exemplar() -> None:
     builder = TextOnlyContextBuilder()
     bundle = builder.build_bundle(
+        state=_state(_snapshot()),
         goal_text='Open the lid.',
-        snapshot=_snapshot(),
         icl_mode='zero_shot',
     )
-    system_prompt = builder.build_system_prompt(bundle)
+    system_prompt = bundle.system_prompt
     assert 'SHARED FEW-SHOT EXEMPLAR' not in system_prompt
     assert 'Valid action lines:' not in system_prompt
     assert 'Follow the executable action contract given in the user prompt.' in system_prompt

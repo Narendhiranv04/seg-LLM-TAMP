@@ -250,12 +250,12 @@ def _snapshot() -> SegmentationSnapshot:
         visible_objects=['mug2', 'box_lid'],
         newly_visible_objects=[],
         object_evidence={
-            'mug2': SegmentationObjectEvidence(name='mug2', visible=True, mask_regions=['box_boundary']),
-            'box_lid': SegmentationObjectEvidence(name='box_lid', visible=True, mask_regions=['box_boundary']),
+            'mug2': SegmentationObjectEvidence(name='mug2', visible=True, mask_regions=['box_storage']),
+            'box_lid': SegmentationObjectEvidence(name='box_lid', visible=True, mask_regions=['box_lid_top']),
         },
         gripper_evidence={},
-        supported_regions=['table', 'placement_boundary', 'cupboard_boundary', 'cupboard_boundary_top', 'box_boundary'],
-        visible_regions=['box_boundary'],
+        supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage', 'box_lid_top'],
+        visible_regions=['box_storage', 'box_lid_top'],
     )
 
 
@@ -294,7 +294,7 @@ def test_pipeline_replans_with_previous_direct_actions() -> None:
     assert 'FAILURE CONTEXT:' in planner.requests[1]['user_prompt']
     assert 'remaining_actions=place(mug2, placement_boundary)' in planner.requests[1]['user_prompt']
     assert 'CURRENT SEGMENTATION SNAPSHOT:' in planner.requests[0]['user_prompt']
-    assert 'mask_regions=box_boundary' in planner.requests[0]['user_prompt']
+    assert 'mask_regions=box_storage' in planner.requests[0]['user_prompt']
     assert segmentation_adapter.refresh_calls[:2] == ['initial', 'initial']
     assert segmentation_adapter.action_sequence_calls[0]['actions'] == []
     assert segmentation_adapter.live_updates >= 1

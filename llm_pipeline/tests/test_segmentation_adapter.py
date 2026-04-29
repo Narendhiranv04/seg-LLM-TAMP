@@ -93,8 +93,8 @@ def test_segmentation_adapter_fuses_mask_regions_and_discovery() -> None:
 
     assert first_snapshot.visible_objects == ['mug2']
     assert first_snapshot.newly_visible_objects == ['mug2']
-    assert first_snapshot.visible_regions == ['box_boundary']
-    assert first_snapshot.object_evidence['mug2'].mask_regions == ['box_boundary']
+    assert first_snapshot.visible_regions == ['box_storage']
+    assert first_snapshot.object_evidence['mug2'].mask_regions == ['box_storage']
     assert first_snapshot.object_evidence['mug2'].camera_hits == ['overhead']
     assert first_snapshot.object_evidence['mug2'].gripper_proximity is not None
 
@@ -128,7 +128,7 @@ def test_segmentation_adapter_refreshes_direct_detector_and_live_view_methods() 
     visibility = adapter.refresh_visibility(event='initial')
     assert visibility['visible_objects'] == ['mug2', 'box_lid']
     assert visibility['newly_visible_objects'] == ['mug2']
-    assert visibility['visible_regions'] == ['box_boundary']
+    assert visibility['visible_regions'] == ['box_storage']
 
     detected = adapter.update_live_segmentation_view()
     assert detected == {'mug2', 'box_lid'}

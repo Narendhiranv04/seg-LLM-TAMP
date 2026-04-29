@@ -76,8 +76,8 @@ def debug_execution_flow():
         # # Subtask 2: Table grocery -> Cupboard
         ('move', ('sugar',)),
         ('pick', ('sugar',)),
-        ('move', ('cupboard_boundary',)),
-        ('place', ('sugar', 'cupboard_boundary')),
+        ('move', ('cupboard_lower',)),
+        ('place', ('sugar', 'cupboard_lower')),
 
         # Subtask 3: Box-top mug -> Placement Boundary
         ('move', ('mug5',)),
@@ -92,20 +92,20 @@ def debug_execution_flow():
         # Subtask 5: Box grocery -> cupboard
         ('move', ('soup',)),
         ('pick', ('soup',)),
-        ('move', ('cupboard_boundary',)),
-        ('place', ('soup', 'cupboard_boundary')),
+        ('move', ('cupboard_lower',)),
+        ('place', ('soup', 'cupboard_lower')),
 
         # Subtask 6: Table mug 1 -> box
         ('move', ('mug2',)),
         ('pick', ('mug2',)),
-        ('move', ('box_boundary',)),
-        ('place', ('mug2', 'box_boundary')),
+        ('move', ('box_storage',)),
+        ('place', ('mug2', 'box_storage')),
 
         # Subtask 7: Table mug 2 -> box
         ('move', ('mug3',)),
         ('pick', ('mug3',)),
-        ('move', ('box_boundary',)),
-        ('place', ('mug3', 'box_boundary'))
+        ('move', ('box_storage',)),
+        ('place', ('mug3', 'box_storage'))
     ])
 
     # 4. Run one cycle of the pipeline

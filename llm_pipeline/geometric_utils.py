@@ -4,6 +4,8 @@ from __future__ import annotations
 import numpy as np
 from typing import Dict, Tuple, Optional
 
+from llm_pipeline.region_aliases import normalize_region_name
+
 
 def is_inside_xy(point: Tuple[float, float, float], world_min: np.ndarray, world_max: np.ndarray, padding: float = 0.08) -> bool:
     """Check if point is within the X-Y footprint with generous padding."""
@@ -24,11 +26,11 @@ def resolve_region(obj_pos: Tuple[float, float, float], region_map: Dict[str, Tu
     """
     # Priority order: most specific regions first
     priority = [
-        'box-inside',
-        'box-top',
+        'box_inside_fallback',
+        'box_lid_top',
         'placement_boundary',
-        'cupboard_boundary_top',
-        'cupboard_boundary',
+        'cupboard_upper',
+        'cupboard_lower',
         'groceries_boundary',
         'table'
     ]
@@ -36,6 +38,7 @@ def resolve_region(obj_pos: Tuple[float, float, float], region_map: Dict[str, Tu
     z = obj_pos[2]
     
     for region_name in priority:
+        region_name = normalize_region_name(region_name)
         if region_name not in region_map:
             continue
             
@@ -59,11 +62,11 @@ def resolve_region(obj_pos: Tuple[float, float, float], region_map: Dict[str, Tu
             if z >= z_min - 0.15 and z <= z_min + 0.20:
                 if region_name == 'placement_boundary':
                     return region_name, "on table"
-                if region_name == 'cupboard_boundary':
+                if region_name == 'cupboard_lower':
                     return region_name, "inside cupboard"
-                if region_name == 'cupboard_boundary_top':
+                if region_name == 'cupboard_upper':
                     return region_name, "on top cupboard shelf"
-                if region_name == 'box-inside':
+                if region_name == 'box_inside_fallback':
                     return region_name, "inside the box"
                 if region_name == 'groceries_boundary':
                     return region_name, "on table"
@@ -73,7 +76,7 @@ def resolve_region(obj_pos: Tuple[float, float, float], region_map: Dict[str, Tu
             if z >= z_min - 0.05 and z <= z_max + 0.10:
                 if region_name == 'table':
                     return region_name, "on table"
-                if region_name == 'box-top':
+                if region_name == 'box_lid_top':
                     return region_name, "on top of the box"
 
     # Default fallback

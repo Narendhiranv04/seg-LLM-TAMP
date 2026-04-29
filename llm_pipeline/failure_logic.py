@@ -6,6 +6,7 @@ from typing import Iterable, Optional
 
 from llm_pipeline.segmentation_adapter import SegmentationEvidenceAdapter
 from llm_pipeline.pipeline_types import DirectAction, FailureEvent, FailureSource, FailureStage, SegmentationSnapshot
+from llm_pipeline.region_aliases import normalize_region_name
 
 
 class SegmentationFirstFailureChecker:
@@ -75,6 +76,7 @@ class SegmentationFirstFailureChecker:
 
         if action.action_name == 'place':
             object_name, target_region = action.args
+            target_region = normalize_region_name(target_region)
             if held_object != object_name:
                 return FailureEvent(
                     failure_id='invalid_executor_state',
@@ -137,6 +139,7 @@ class SegmentationFirstFailureChecker:
 
         if action.action_name == 'place':
             object_name, target_region = action.args
+            target_region = normalize_region_name(target_region)
             evidence = snapshot.object_evidence.get(object_name)
             if evidence is None or not evidence.visible:
                 return FailureEvent(
@@ -148,7 +151,7 @@ class SegmentationFirstFailureChecker:
                     message=f'{object_name} is no longer visible after place execution',
                 )
 
-            if target_region in set(evidence.mask_regions):
+            if target_region in {normalize_region_name(region) for region in evidence.mask_regions}:
                 return self._maybe_new_visibility_failure(action, snapshot)
             return FailureEvent(
                 failure_id='placement_failed',
@@ -319,6 +322,7 @@ class GeometricFailureChecker(SegmentationFirstFailureChecker):
 
         if action.action_name == 'place':
             obj_name, region_name = action.args
+            region_name = normalize_region_name(region_name)
             region_pose = detector.get_object_pose(region_name)
             if not region_pose:
                  return FailureEvent(
@@ -352,6 +356,7 @@ class GeometricFailureChecker(SegmentationFirstFailureChecker):
         # Place Success Verification (3D Containment/Accuracy)
         if action.action_name == 'place':
             obj_name, region_name = action.args
+            region_name = normalize_region_name(region_name)
             detector = getattr(self.adapter, 'detector', None)
             if detector:
                 obj_pose = detector.get_object_pose(obj_name)

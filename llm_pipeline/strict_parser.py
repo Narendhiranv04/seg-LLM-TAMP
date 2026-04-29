@@ -8,6 +8,7 @@ from typing import Iterable, List, Optional
 
 from llm_pipeline.executable_symbols import ACTION_SYMBOLS, EXECUTABLE_OBJECTS, EXECUTABLE_REGIONS
 from llm_pipeline.pipeline_types import DirectAction
+from llm_pipeline.region_aliases import normalize_region_name
 
 
 ACTION_CALL = re.compile(r'^(pick|place|open)\(([A-Za-z0-9_-]+)(?:,\s*([A-Za-z0-9_-]+))?\)$')
@@ -99,13 +100,14 @@ class StrictActionParser:
             if action_name == 'place':
                 if arg1 is None:
                     raise StrictParseError('place requires object and region arguments', line_number=index)
+                target_region = normalize_region_name(arg1)
                 if arg0 not in self.valid_objects or arg0 == 'box_lid':
                     raise StrictParseError(
                         f"Unknown or unplaceable object '{arg0}'",
                         line_number=index,
                         failure_id='unknown_action_token',
                     )
-                if arg1 not in self.valid_regions:
+                if target_region not in self.valid_regions:
                     raise StrictParseError(
                         f"Unknown target region '{arg1}'",
                         line_number=index,
@@ -124,7 +126,7 @@ class StrictActionParser:
                         failure_id='pick_place_mismatch',
                     )
                 holding = None
-                actions.append(DirectAction('place', (arg0, arg1)))
+                actions.append(DirectAction('place', (arg0, target_region)))
                 continue
 
             if arg0 != 'box_lid' or arg1 is not None:

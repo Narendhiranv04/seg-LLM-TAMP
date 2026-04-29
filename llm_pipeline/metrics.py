@@ -8,14 +8,15 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from evaluation.canonical_variants import get_variant_spec
 from evaluation.metrics import aggregate_model_records, collect_failure_occurrences
+from llm_pipeline.region_aliases import BOX_STORAGE_REGION, normalize_region_name
 
 
 ACTION_PATTERN = re.compile(r'^\s*([A-Za-z0-9_-]+)\((.*?)\)\s*$')
 MUG_OBJECTS = {'mug1', 'mug2', 'mug3', 'mug4'}
 GROCERY_OBJECTS = {'soup', 'mustard', 'spam', 'sugar', 'crackers'}
-BOX_REGIONS = {'box_boundary', 'box_top', 'box_inside', 'box-top', 'box-inside'}
+BOX_REGIONS = {'box_storage', 'box_boundary', 'box_top', 'box_inside', 'box-top', 'box-inside'}
 PLACEMENT_REGIONS = {'placement_boundary', 'table'}
-CUPBOARD_REGIONS = {'cupboard_boundary', 'cupboard_boundary_top', 'cupboard', 'groceries_boundary'}
+CUPBOARD_REGIONS = {'cupboard_lower', 'cupboard_upper', 'cupboard_boundary', 'cupboard_boundary_top', 'cupboard', 'groceries_boundary'}
 
 
 def _normalize_token(token: Optional[str]) -> str:
@@ -34,13 +35,13 @@ def _normalize_action_name(name: str) -> str:
 
 
 def _normalize_region(region: Optional[str]) -> str:
-    token = _normalize_token(region)
+    token = normalize_region_name(_normalize_token(region))
     if token in BOX_REGIONS:
-        return 'box_boundary'
+        return BOX_STORAGE_REGION
     if token in PLACEMENT_REGIONS:
         return 'placement_boundary'
     if token in CUPBOARD_REGIONS:
-        return 'cupboard_boundary'
+        return 'cupboard_lower'
     return token
 
 
@@ -64,9 +65,9 @@ def _bucket_for_transfer(object_name: str, region_name: str) -> Optional[str]:
     region = _normalize_region(region_name)
     if obj in MUG_OBJECTS and region == 'placement_boundary':
         return 'mug_to_placement'
-    if obj in MUG_OBJECTS and region == 'box_boundary':
+    if obj in MUG_OBJECTS and region == BOX_STORAGE_REGION:
         return 'mug_to_box'
-    if obj in GROCERY_OBJECTS and region == 'cupboard_boundary':
+    if obj in GROCERY_OBJECTS and region == 'cupboard_lower':
         return 'grocery_to_cupboard'
     return None
 

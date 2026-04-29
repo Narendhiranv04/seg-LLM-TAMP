@@ -20,6 +20,12 @@ from pddlstream.algorithms.meta import solve
 from pddlstream.language.constants import And, PDDLProblem
 
 from llm_pipeline.pipeline_types import DirectAction, FailureEvent, FailureStage, FailureSource
+from llm_pipeline.region_aliases import (
+    BOX_INSIDE_FALLBACK_REGION,
+    BOX_STORAGE_REGION,
+    CUPBOARD_TARGET_REGIONS,
+    normalize_region_name,
+)
 from vlm_pipeline.vlm_executor_v2 import (
     VLMExecutorV2,
     _normalize_segments,
@@ -70,7 +76,7 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
     """Bundling rituals for the Kitchen scene."""
     def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
         obj_name = p_action.args[0]
-        target_region = pl_action.args[1]
+        target_region = normalize_region_name(pl_action.args[1])
         print(f"[KITCHEN-BUNDLE] --- Starting GT Transfer Ritual: {obj_name} -> {target_region} ---")
         
         # 1. Pre-action Home
@@ -87,9 +93,14 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
         success = gt_executor.execute_all()
         
         # Fallback logic for box placements (mirroring GT)
-        if not success and target_region == "box_boundary":
-            print(f"[Fallback] {obj_name}: box_boundary failed, trying box-inside region.")
-            gt_executor = create_primitive_transfer_executor(self.env, obj_name, "box-inside", task_name=f"{task_label} [fallback box-inside]")
+        if not success and target_region == BOX_STORAGE_REGION:
+            print(f"[Fallback] {obj_name}: box_storage failed, trying box_inside_fallback region.")
+            gt_executor = create_primitive_transfer_executor(
+                self.env,
+                obj_name,
+                BOX_INSIDE_FALLBACK_REGION,
+                task_name=f"{task_label} [fallback box_inside_fallback]",
+            )
             success = gt_executor.execute_all()
         
         # Post-action Home
@@ -456,8 +467,9 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
             return self._execute_pick_pddl(object_name)
         if action.action_name == 'place':
             object_name, target_region = action.args
+            target_region = normalize_region_name(target_region)
             # Cupboard: scripted insert from hover → release → home
-            if target_region in ('cupboard_boundary', 'cupboard_boundary_top'):
+            if target_region in CUPBOARD_TARGET_REGIONS:
                 return self._execute_cupboard_place_from_hover(object_name, target_region)
             return self._execute_place_pddl(object_name, target_region)
         if action.action_name == 'open':
@@ -484,8 +496,9 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
 
         if next_action is not None and next_action.action_name == 'place':
             object_name, target_region = next_action.args
+            target_region = normalize_region_name(target_region)
             # Cupboard: carry object from pick hover → place hover (scripted, no PDDL)
-            if target_region in ('cupboard_boundary', 'cupboard_boundary_top'):
+            if target_region in CUPBOARD_TARGET_REGIONS:
                 return self._move_to_cupboard_place_hover(object_name, target_region)
             # For non-cupboard regions: PDDL pre-solve moves to place hover and caches segments.
             result = self._presolve_place(object_name, target_region)
@@ -557,6 +570,7 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
 
     def _presolve_place(self, object_name: str, target_region: str) -> Optional[bool]:
         """Run PDDL solve for place, execute move trajectory, cache place segments."""
+        target_region = normalize_region_name(target_region)
         self._load_pddl_files()
         env = self.env
         env.set_target_region(target_region)
@@ -672,6 +686,7 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
 
     def _execute_place_pddl(self, object_name: str, target_region: str) -> Tuple[bool, str]:
         env = self.env
+        target_region = normalize_region_name(target_region)
 
         # Use cached place segments from a preceding move's PDDL pre-solve
         cached = self._pending_pddl_segments
@@ -876,6 +891,7 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
     def _move_to_cupboard_place_hover(self, object_name: str, target_region: str) -> Tuple[bool, str]:
         """Move from pick hover → home → place hover while carrying the object.
         Routes through home to avoid IK failures from awkward pick hover configs."""
+        target_region = normalize_region_name(target_region)
         env = self.env
         obj = env.get_object(object_name)
         if obj is None:
@@ -1093,4 +1109,3 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
 
         self._manual_hold_context = None
         return True, 'Success'
-

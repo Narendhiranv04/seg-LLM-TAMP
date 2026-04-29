@@ -10,6 +10,12 @@ import numpy as np
 
 from llm_pipeline.executable_symbols import RuntimeSymbolRegistry, build_runtime_symbol_registry
 from llm_pipeline.pipeline_types import SegmentationObjectEvidence, SegmentationSnapshot
+from llm_pipeline.region_aliases import (
+    BOX_LID_TOP_REGION,
+    BOX_STORAGE_REGION,
+    normalize_region_name,
+    normalize_region_names,
+)
 
 try:
     from segmentation_object_detector import SegmentationObjectDetector
@@ -108,7 +114,7 @@ class SegmentationEvidenceAdapter:
                 self.symbol_registry.objects,
             )
             visible_regions = self._ordered_tokens(
-                [name for name in detector_snapshot.get('visible_regions', []) if name in valid_regions],
+                [name for name in normalize_region_names(detector_snapshot.get('visible_regions', [])) if name in valid_regions],
                 self.symbol_registry.regions,
             )
             snapshot = {
@@ -169,7 +175,10 @@ class SegmentationEvidenceAdapter:
         object_bbox = defaultdict(dict)
         object_centroid = defaultdict(dict)
         region_votes = defaultdict(Counter)
-        visible_regions = set(name for name in detector_snapshot.get('visible_regions', []) if name in valid_regions)
+        visible_regions = set(
+            name for name in normalize_region_names(detector_snapshot.get('visible_regions', []))
+            if name in valid_regions
+        )
         gripper_centroids = {}
 
         handle_map = getattr(self.detector, 'handle_to_task_name', {}) if self.detector is not None else {}
@@ -190,6 +199,10 @@ class SegmentationEvidenceAdapter:
 
             object_stats = self._extract_mask_stats(handle_mask, handle_map)
             region_stats = self._extract_mask_stats(handle_mask, region_map)
+            region_stats = {
+                normalize_region_name(region_name): stats
+                for region_name, stats in region_stats.items()
+            }
             inferred_regions = self._infer_regions_from_camera(object_stats, region_stats)
 
             for obj_name, stats in object_stats.items():
@@ -202,6 +215,7 @@ class SegmentationEvidenceAdapter:
                 object_centroid[obj_name][camera_name] = self._normalize_centroid(stats['centroid'], handle_mask.shape)
 
             for region_name in region_stats:
+                region_name = normalize_region_name(region_name)
                 if region_name in valid_regions:
                     visible_regions.add(region_name)
 
@@ -210,6 +224,7 @@ class SegmentationEvidenceAdapter:
                     continue
                 vote_map = region_votes[obj_name]
                 for rank, region_name in enumerate(regions[:4]):
+                    region_name = normalize_region_name(region_name)
                     if region_name not in valid_regions:
                         continue
                     vote_map[region_name] += max(0.5, 3.0 - rank)
@@ -241,7 +256,7 @@ class SegmentationEvidenceAdapter:
             )
             ordered_regions = []
             seen_regions = set()
-            for region_name in detector_object_regions.get(object_name, []):
+            for region_name in normalize_region_names(detector_object_regions.get(object_name, [])):
                 if region_name in valid_regions and region_name not in seen_regions:
                     seen_regions.add(region_name)
                     ordered_regions.append(region_name)
@@ -282,18 +297,29 @@ class SegmentationEvidenceAdapter:
         )
 
     def is_lid_open(self, snapshot: SegmentationSnapshot) -> bool:
+        if self.env is not None:
+            try:
+                lid_obj = self.env.get_object('box_lid')
+                box_obj = self.env.get_object('box_base')
+                if lid_obj is not None and box_obj is not None:
+                    lid_pos = lid_obj.get_position()
+                    box_pos = box_obj.get_position()
+                    return abs(float(lid_pos[0]) - float(box_pos[0])) > 0.10
+            except Exception:
+                pass
+
         lid_evidence = snapshot.object_evidence.get('box_lid')
         if lid_evidence is None or not lid_evidence.visible:
             return False
         mask_regions = set(lid_evidence.mask_regions)
-        return bool(mask_regions) and 'box_boundary' not in mask_regions
+        return bool(mask_regions) and BOX_LID_TOP_REGION not in mask_regions and BOX_STORAGE_REGION not in mask_regions
 
     def blocking_objects_for_lid(self, snapshot: SegmentationSnapshot) -> list[str]:
         blockers = []
         for name, evidence in snapshot.object_evidence.items():
             if name == 'box_lid' or not evidence.visible:
                 continue
-            if 'box_boundary' in set(evidence.mask_regions):
+            if BOX_STORAGE_REGION in set(evidence.mask_regions):
                 blockers.append(name)
         return sorted(blockers)
 

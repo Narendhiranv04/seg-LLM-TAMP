@@ -14,7 +14,7 @@ class FakeAdapter:
 
     def is_lid_open(self, snapshot: SegmentationSnapshot) -> bool:
         evidence = snapshot.object_evidence.get('box_lid')
-        return evidence is not None and 'box_boundary' not in set(evidence.mask_regions)
+        return evidence is not None and 'box_lid_top' not in set(evidence.mask_regions)
 
     def blocking_objects_for_lid(self, snapshot: SegmentationSnapshot):
         return []
@@ -31,14 +31,19 @@ def _snapshot(object_evidence, newly_visible=None, visible_regions=None):
         newly_visible_objects=list(newly_visible or []),
         object_evidence=object_evidence,
         gripper_evidence={},
-        supported_regions=['table', 'placement_boundary', 'cupboard_boundary', 'cupboard_boundary_top', 'box_boundary'],
+        supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage'],
         visible_regions=list(visible_regions or []),
     )
 
 
 def test_precheck_flags_missing_pick_object() -> None:
     snapshot = _snapshot({})
-    failure = checker.precheck(DirectAction('pick', ('mug4',)), held_object=None, snapshot=snapshot)
+    failure = checker.precheck(
+        DirectAction('pick', ('mug4',)),
+        held_object=None,
+        snapshot=snapshot,
+        last_action_name='move',
+    )
     assert failure is not None
     assert failure.failure_id == 'pick_object_missing'
     assert failure.stage == FailureStage.BEFORE_EXECUTION
@@ -48,9 +53,9 @@ def test_precheck_flags_missing_pick_object() -> None:
 def test_postcheck_flags_bad_place_region() -> None:
     snapshot = _snapshot(
         {
-            'mug2': SegmentationObjectEvidence(name='mug2', visible=True, mask_regions=['cupboard_boundary']),
+            'mug2': SegmentationObjectEvidence(name='mug2', visible=True, mask_regions=['cupboard_lower']),
         },
-        visible_regions=['cupboard_boundary'],
+        visible_regions=['cupboard_lower'],
     )
     failure = checker.postcheck(
         DirectAction('place', ('mug2', 'placement_boundary')),
@@ -66,10 +71,10 @@ def test_postcheck_triggers_replan_for_new_visibility() -> None:
     snapshot = _snapshot(
         {
             'box_lid': SegmentationObjectEvidence(name='box_lid', visible=True, mask_regions=['placement_boundary']),
-            'mug4': SegmentationObjectEvidence(name='mug4', visible=True, mask_regions=['box_boundary']),
+            'mug4': SegmentationObjectEvidence(name='mug4', visible=True, mask_regions=['box_storage']),
         },
         newly_visible=['mug4'],
-        visible_regions=['placement_boundary', 'box_boundary'],
+        visible_regions=['placement_boundary', 'box_storage'],
     )
     failure = checker.postcheck(DirectAction('open', ('box_lid',)), held_object=None, snapshot=snapshot)
     assert failure is not None

@@ -17,6 +17,7 @@ from llm_pipeline.planner import TextLLMPlanner
 from llm_pipeline.prompt_builder import TextOnlyContextBuilder
 from llm_pipeline.segmentation_adapter import SegmentationEvidenceAdapter
 from llm_pipeline.strict_parser import StrictActionParser
+from llm_pipeline.region_aliases import scene_object_for_region
 from llm_pipeline.pipeline_types import (
     DirectAction, FailureEvent, PlanResult, ICLMode, SceneState,
     BasePlanner, BaseContextBuilder
@@ -371,11 +372,7 @@ class LLMOnlyReplanningPipeline:
             # This ensures GeometricContextBuilder has the data needed for resolve_region().
             for region_name in snapshot.supported_regions:
                 # Map semantic names to simulator names if needed
-                scene_name = region_name
-                if region_name == 'box-top' or region_name == 'box-inside':
-                    scene_name = 'box_base'
-                elif region_name == 'shelf-lower':
-                    scene_name = 'cupboard'
+                scene_name = scene_object_for_region(region_name)
                 
                 bb = detector.get_bounding_box(scene_name)
                 if bb:

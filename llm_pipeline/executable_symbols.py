@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional, Tuple
 
+from llm_pipeline.region_aliases import CANONICAL_KITCHEN_REGION_ORDER, normalize_region_names
+
 
 ACTION_SYMBOLS: Tuple[str, ...] = ("move", "pick", "place", "open")
 DEFAULT_OBJECT_ORDER: Tuple[str, ...] = (
@@ -29,14 +31,7 @@ GRILL_OBJECT_ORDER: Tuple[str, ...] = (
     "grill_lid",
     "lid",
 )
-DEFAULT_REGION_ORDER: Tuple[str, ...] = (
-    "table",
-    "placement_boundary",
-    "cupboard_boundary",
-    "cupboard_boundary_top",
-    "box_boundary",
-    "groceries_boundary",
-)
+DEFAULT_REGION_ORDER: Tuple[str, ...] = CANONICAL_KITCHEN_REGION_ORDER
 GRILL_REGION_ORDER: Tuple[str, ...] = (
     "grill-top",
     "plate-top",
@@ -144,7 +139,7 @@ def _regions_from_env(env) -> Tuple[str, ...]:
     known_order = DEFAULT_REGION_ORDER + tuple(
         name for name in GRILL_REGION_ORDER if name not in set(DEFAULT_REGION_ORDER)
     )
-    names = _ordered_known_then_extras(region_map.keys(), known_order)
+    names = _ordered_known_then_extras(normalize_region_names(region_map.keys()), known_order)
     return names or EXECUTABLE_REGIONS
 
 

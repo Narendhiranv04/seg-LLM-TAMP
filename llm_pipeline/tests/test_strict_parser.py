@@ -8,30 +8,39 @@ def test_parses_direct_ground_truth_actions_with_move() -> None:
     actions = parser.parse(
         'move\n'
         'pick(mug2)\n'
+        'move\n'
         'place(mug2, placement_boundary)\n'
+        'move\n'
         'open(box_lid)\n'
     )
     assert [str(action) for action in actions] == [
-        'move',
+        'move(→pick)',
         'pick(mug2)',
+        'move(→place)',
         'place(mug2, placement_boundary)',
+        'move(→open)',
         'open(box_lid)',
     ]
 
 
 def test_parses_replan_while_already_holding_object() -> None:
     actions = parser.parse('move\nplace(mug2, placement_boundary)', held_object='mug2')
-    assert [str(action) for action in actions] == ['move', 'place(mug2, placement_boundary)']
+    assert [str(action) for action in actions] == ['move(→place)', 'place(mug2, placement_boundary)']
 
 
-def test_rejects_numbered_or_bulleted_output() -> None:
-    try:
-        parser.parse('1. pick(mug2)')
-    except StrictParseError as exc:
-        assert 'Numbering or bullets are not allowed' in str(exc)
-        assert exc.failure_id == 'unknown_action_token'
-    else:
-        raise AssertionError('Expected numbered output to fail strict parsing')
+def test_normalizes_legacy_region_names() -> None:
+    actions = parser.parse('move\npick(mug2)\nmove\nplace(mug2, box_boundary)')
+    assert [str(action) for action in actions] == [
+        'move(→pick)',
+        'pick(mug2)',
+        'move(→place)',
+        'place(mug2, box_storage)',
+    ]
+
+
+def test_accepts_numbered_output_by_stripping_prefixes() -> None:
+    actions = parser.parse('1. move\n2. pick(mug2)\n3. move\n4. place(mug2, box_boundary)')
+    assert [str(action) for action in actions][-1] == 'place(mug2, box_storage)'
 
 
 def test_rejects_orphan_place() -> None:
