@@ -122,3 +122,31 @@ def test_zero_shot_system_prompt_has_no_shared_exemplar() -> None:
     assert 'Valid action lines:' not in system_prompt
     assert 'Follow the executable action contract given in the user prompt.' in system_prompt
     assert 'mug_box' not in system_prompt
+
+
+def test_fallback_regions_are_hidden_from_llm_prompt() -> None:
+    snapshot = _snapshot()
+    snapshot.supported_regions = [
+        'table',
+        'cupboard_lower',
+        'box_storage',
+        'box_inside_fallback',
+        'cupboard_fallback',
+    ]
+    snapshot.visible_regions = ['box_storage', 'box_inside_fallback', 'cupboard_fallback']
+    snapshot.object_evidence['mug2'].mask_regions = [
+        'box_storage',
+        'box_inside_fallback',
+        'cupboard_fallback',
+    ]
+
+    bundle = TextOnlyContextBuilder().build_bundle(
+        state=_state(snapshot),
+        goal_text='Move mug2 to box_storage.',
+        icl_mode='zero_shot',
+    )
+
+    assert 'box_storage' in bundle.user_prompt
+    assert 'cupboard_lower' in bundle.user_prompt
+    assert 'box_inside_fallback' not in bundle.user_prompt
+    assert 'cupboard_fallback' not in bundle.user_prompt

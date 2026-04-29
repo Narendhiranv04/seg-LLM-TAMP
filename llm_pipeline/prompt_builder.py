@@ -14,6 +14,7 @@ from llm_pipeline.pipeline_types import (
     SegmentationSnapshot,
     TextPromptBundle,
 )
+from llm_pipeline.region_aliases import PLANNER_HIDDEN_REGIONS, normalize_region_name
 
 
 PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
@@ -132,8 +133,8 @@ class TextOnlyContextBuilder(BaseContextBuilder):
         held_object: Optional[str],
     ) -> str:
         visible_objects = list(snapshot.visible_objects) if snapshot is not None else []
-        visible_regions = list(snapshot.visible_regions) if snapshot is not None else []
-        supported_regions = list(snapshot.supported_regions) if snapshot is not None else list(self.symbol_registry.regions)
+        visible_regions = self._planner_visible_regions(snapshot.visible_regions) if snapshot is not None else []
+        supported_regions = self._planner_visible_regions(snapshot.supported_regions) if snapshot is not None else self._planner_visible_regions(self.symbol_registry.regions)
 
         lines = ['CURRENT SEGMENTATION SNAPSHOT:', '']
         lines.append(f'- frame_index: {snapshot.frame_index if snapshot is not None else 0}')
@@ -163,8 +164,9 @@ class TextOnlyContextBuilder(BaseContextBuilder):
                 facts.append(f'camera_pixels={self._format_camera_pixels(evidence.camera_pixels)}')
             if evidence.pixel_count:
                 facts.append(f'pixel_count={evidence.pixel_count}')
-            if evidence.mask_regions:
-                facts.append(f'mask_regions={"|".join(evidence.mask_regions)}')
+            mask_regions = self._planner_visible_regions(evidence.mask_regions)
+            if mask_regions:
+                facts.append(f'mask_regions={"|".join(mask_regions)}')
             if evidence.centroid:
                 facts.append(f'centroids={self._format_point_map(evidence.centroid)}')
             if evidence.bbox:
@@ -180,7 +182,7 @@ class TextOnlyContextBuilder(BaseContextBuilder):
     def _build_visible_text(self, snapshot: Optional[SegmentationSnapshot]) -> str:
         visible_objects = list(snapshot.visible_objects) if snapshot is not None else []
         newly_visible = list(snapshot.newly_visible_objects) if snapshot is not None else []
-        visible_regions = list(snapshot.visible_regions) if snapshot is not None else []
+        visible_regions = self._planner_visible_regions(snapshot.visible_regions) if snapshot is not None else []
         lines = ['COMPACT SEGMENTATION SUMMARY:', '']
         lines.append('visible_objects=' + (', '.join(visible_objects) if visible_objects else '(none)'))
         lines.append('newly_visible_objects=' + (', '.join(newly_visible) if newly_visible else '(none)'))
@@ -192,8 +194,9 @@ class TextOnlyContextBuilder(BaseContextBuilder):
             if evidence is None:
                 continue
             facts = []
-            if evidence.mask_regions:
-                facts.append(f'mask_regions={"|".join(evidence.mask_regions)}')
+            mask_regions = self._planner_visible_regions(evidence.mask_regions)
+            if mask_regions:
+                facts.append(f'mask_regions={"|".join(mask_regions)}')
             if evidence.camera_hits:
                 facts.append(f'camera_hits={"|".join(evidence.camera_hits)}')
             if evidence.pixel_count:
@@ -202,6 +205,15 @@ class TextOnlyContextBuilder(BaseContextBuilder):
                 facts.append(f'gripper_proximity={evidence.gripper_proximity:.4f}')
             lines.append(f'- {name}: {", ".join(facts) if facts else "visible=true"}')
         return '\n'.join(lines)
+
+    @staticmethod
+    def _planner_visible_regions(regions: Iterable[str]) -> List[str]:
+        hidden = set(PLANNER_HIDDEN_REGIONS)
+        return [
+            region
+            for region in regions
+            if normalize_region_name(region) not in hidden
+        ]
 
     @staticmethod
     def _format_camera_pixels(camera_pixels) -> str:

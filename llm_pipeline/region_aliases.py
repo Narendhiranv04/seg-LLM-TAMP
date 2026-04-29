@@ -33,6 +33,7 @@ BOX_STORAGE_REGION = "box_storage"
 BOX_INSIDE_FALLBACK_REGION = "box_inside_fallback"
 BOX_LID_TOP_REGION = "box_lid_top"
 CUPBOARD_TARGET_REGIONS = ("cupboard_lower", "cupboard_upper")
+PLANNER_HIDDEN_REGIONS = (BOX_INSIDE_FALLBACK_REGION, "cupboard_fallback")
 CANONICAL_REGION_SCENE_OBJECTS = {
     "box_storage": "box_boundary",
     "box_lid_top": "box_lid",
