@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import numpy as np
 from dataclasses import dataclass, field
@@ -59,6 +60,8 @@ class LLMPipelineConfig:
     live_view_update_stride: int = 5
     use_remote_planner: bool = False
     remote_planner_url: str = ''
+    task_family: str = 'kitchen'
+    scene_path: str = ''
     
     # NEW Multimodal & Prompting Flags
     enable_vision: bool = False
@@ -139,7 +142,20 @@ class LLMOnlyReplanningPipeline:
     def initialize(self, env=None) -> bool:
         if env is None:
             os.environ['HEADLESS'] = 'True' if self.config.headless else 'False'
-            from rlbench_kitchen_streams import ENV  # Lazy import for testability
+            scene_path = (self.config.scene_path or '').strip()
+            task_family = (self.config.task_family or 'kitchen').strip().lower()
+
+            if task_family == 'grill':
+                if scene_path:
+                    os.environ['GRILL_SCENE_FILE'] = scene_path
+                grill_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'grill_task2')
+                if grill_dir not in sys.path:
+                    sys.path.insert(0, grill_dir)
+                from grill_task_streams import ENV  # Lazy import for testability
+            else:
+                if scene_path:
+                    os.environ['KITCHEN_SCENE_FILE'] = scene_path
+                from rlbench_kitchen_streams import ENV  # Lazy import for testability
 
             env = ENV
         self.env = env
