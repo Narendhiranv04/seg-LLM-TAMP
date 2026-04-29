@@ -76,7 +76,7 @@ class SegmentationObjectDetector:
             'spam': ['spam', 'tin'],
             'sugar': ['sugar', 'food_box'],
             'crackers': ['crackers', 'cereal'],
-            'box_lid': ['box_lid', 'lid'],
+            'box_lid': ['box_lid'],
             'cupboard': ['cupboard'],
             'steak': ['steak', 'steak_visual'],
             'chicken': ['chicken', 'chicken_visual'],
@@ -265,7 +265,7 @@ class SegmentationObjectDetector:
             return 'mug2'
         if 'mug_table' in n or re.search(r'\bmug1\b', n):
             return 'mug1'
-        if 'box_lid' in n or n == 'lid':
+        if 'box_lid' in n:
             return 'box_lid'
         if 'cupboard' in n:
             return 'cupboard'
