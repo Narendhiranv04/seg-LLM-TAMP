@@ -55,11 +55,17 @@ class SegmentationObjectDetector:
         self.min_pixels_per_camera = int(os.environ.get('LIVE_SEG_MIN_PIXELS', '10'))
         self.persistence_frames = int(os.environ.get('LIVE_SEG_PERSIST_FRAMES', '30'))
         
-        self.task_objects = {
+        default_task_objects = {
             'mug1', 'mug2', 'mug3', 'mug4',
             'soup', 'mustard', 'spam', 'sugar', 'crackers',
             'box_lid', 'cupboard'
         }
+        env_task_objects = {
+            str(name).strip()
+            for name, obj in (getattr(self.env, 'name_to_obj', {}) or {}).items()
+            if str(name).strip() and obj is not None
+        }
+        self.task_objects = default_task_objects | env_task_objects
         self.env_aliases = {
             'mug1': ['mug1', 'mug_table', 'mug_table_shape'],
             'mug2': ['mug2', 'mug_box', 'mug_box_shape'],
@@ -72,6 +78,13 @@ class SegmentationObjectDetector:
             'crackers': ['crackers', 'cereal'],
             'box_lid': ['box_lid', 'lid'],
             'cupboard': ['cupboard'],
+            'steak': ['steak', 'steak_visual'],
+            'chicken': ['chicken', 'chicken_visual'],
+            'meat1': ['meat1', 'steak', 'steak_visual'],
+            'meat2': ['meat2', 'chicken', 'chicken_visual'],
+            'plate': ['plate', 'plate_visual'],
+            'grill_lid': ['grill_lid', 'lid', 'lid_visual'],
+            'lid': ['lid', 'lid_visual'],
         }
         self.handle_to_region_name = {}
         self._build_task_handle_mapping()
@@ -144,7 +157,7 @@ class SegmentationObjectDetector:
                         0,
                     )
                     for handle in shape_handles:
-                        self.handle_to_task_name[int(handle)] = task_name
+                        self.handle_to_task_name.setdefault(int(handle), task_name)
                 except Exception:
                     continue
         except Exception:
@@ -247,6 +260,18 @@ class SegmentationObjectDetector:
             return 'box_lid'
         if 'cupboard' in n:
             return 'cupboard'
+        if 'plate' in n and 'boundary' not in n:
+            return 'plate'
+        if 'steak' in n:
+            return 'steak'
+        if 'chicken' in n:
+            return 'chicken'
+        if re.search(r'\bmeat1\b', n):
+            return 'meat1'
+        if re.search(r'\bmeat2\b', n):
+            return 'meat2'
+        if 'lid' in n and 'box' not in n:
+            return 'grill_lid'
         for name in ('soup', 'mustard', 'spam', 'sugar', 'crackers'):
             if name in n:
                 return name
