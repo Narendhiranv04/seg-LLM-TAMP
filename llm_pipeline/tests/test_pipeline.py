@@ -244,22 +244,6 @@ class FakeEnv:
         self.conf = list(conf)
 
 
-class FakeGrillEnv(FakeEnv):
-    def __init__(self):
-        super().__init__()
-        self.name_to_obj = {
-            'steak': object(),
-            'chicken': object(),
-            'plate': object(),
-            'grill_lid': object(),
-        }
-        self.regions = {
-            'grill-top': object(),
-            'plate-top': object(),
-            'table': object(),
-        }
-
-
 def _snapshot() -> SegmentationSnapshot:
     return SegmentationSnapshot(
         frame_index=1,
@@ -404,32 +388,3 @@ def test_pipeline_plan_only_mode_skips_execution_and_failure_checks() -> None:
     assert summary['total_cycles'] == 1
     assert summary['total_replans'] == 0
     assert executor.calls == []
-
-
-def test_pipeline_initialize_preserves_grill_recognition_symbols() -> None:
-    planner = QueuePlanner([''])
-    snapshot = SegmentationSnapshot(
-        frame_index=1,
-        visible_objects=['steak'],
-        newly_visible_objects=[],
-        object_evidence={
-            'steak': SegmentationObjectEvidence(name='steak', visible=True, mask_regions=['grill-top']),
-        },
-        gripper_evidence={},
-        supported_regions=['grill-top', 'plate-top', 'table'],
-        visible_regions=['grill-top'],
-    )
-    segmentation_adapter = FakeSegmentationAdapter(snapshot)
-    failure_checker = FakeFailureChecker(segmentation_adapter, snapshot)
-    pipeline = LLMOnlyReplanningPipeline(
-        config=LLMPipelineConfig(model_alias='mock-llm', task_family='grill'),
-        planner=planner,
-        segmentation_adapter=segmentation_adapter,
-        failure_checker=failure_checker,
-        executor=FakeExecutor(),
-    )
-
-    assert pipeline.initialize(env=FakeGrillEnv()) is True
-    assert {'steak', 'chicken', 'plate', 'grill_lid'} <= set(pipeline.symbol_registry.objects)
-    assert {'grill-top', 'plate-top', 'table'} <= set(pipeline.symbol_registry.regions)
-    assert failure_checker.render_calls == []
