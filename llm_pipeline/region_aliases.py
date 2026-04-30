@@ -51,6 +51,8 @@ CANONICAL_REGION_SCENE_OBJECTS = {
     "box_inside_fallback": "box_base",
     "cupboard_lower": "cupboard_boundary",
     "cupboard_upper": "cupboard_boundary_top",
+    "grill-top": "grill_boundary",
+    "plate-top": "plate_boundary",
 }
 
 REGION_SEMANTICS = {
@@ -62,6 +64,10 @@ REGION_SEMANTICS = {
     "groceries_boundary": "groceries/source area on the table",
     "box_lid_top": "support surface on top of the box lid for objects resting on the lid",
     "box_inside_fallback": "internal broad box evidence; not a planner target",
+    "grill-top": "top surface of the grill; meat here is on the grill but not necessarily inside a closed grill",
+    "plate-top": "top surface of the plate for placing cooked meat",
+    "plate_boundary": "target area where the plate should be placed",
+    "dish_rack": "rack area where the plate starts",
 }
 
 

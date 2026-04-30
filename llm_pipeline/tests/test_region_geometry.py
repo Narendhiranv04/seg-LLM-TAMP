@@ -40,6 +40,30 @@ def test_groceries_boundary_beats_table() -> None:
     assert region == 'groceries_boundary'
 
 
+def test_grill_top_beats_table_for_meat() -> None:
+    region_map = {
+        'table': _bounds(-1, -1, 0.0, 1, 1, 0.05),
+        'grill-top': _bounds(-0.2, -0.2, 0.12, 0.2, 0.2, 0.14),
+    }
+
+    region, description = resolve_region((0.0, 0.0, 0.20), region_map)
+
+    assert region == 'grill-top'
+    assert description == 'on grill top'
+
+
+def test_plate_top_beats_plate_boundary_for_meat() -> None:
+    region_map = {
+        'plate_boundary': _bounds(-0.2, -0.2, 0.02, 0.2, 0.2, 0.04),
+        'plate-top': _bounds(-0.15, -0.15, 0.05, 0.15, 0.15, 0.06),
+    }
+
+    region, description = resolve_region((0.0, 0.0, 0.10), region_map)
+
+    assert region == 'plate-top'
+    assert description == 'on plate'
+
+
 def test_box_fallback_used_only_when_primary_absent() -> None:
     fallback_only = {'box_inside_fallback': _bounds(-0.2, -0.2, 0.0, 0.2, 0.2, 0.25)}
     with_primary = {
@@ -64,6 +88,7 @@ def test_resolve_object_regions_returns_maps() -> None:
 def test_resolve_object_regions_skips_non_region_fixtures() -> None:
     pose_map = {
         'box_lid': (0.0, 0.0, 0.34),
+        'grill_lid': (0.0, 0.0, 0.34),
         'mug2': (0.0, 0.0, 0.34),
     }
     region_map = {

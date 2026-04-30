@@ -15,13 +15,17 @@ from llm_pipeline.region_aliases import (
 
 RegionBounds = Tuple[np.ndarray, np.ndarray]
 
-NON_REGION_OBJECTS = frozenset({"box_lid"})
+NON_REGION_OBJECTS = frozenset({"box_lid", "grill_lid", "lid"})
 
 PRIMARY_REGION_PRIORITY = (
     "cupboard_upper",
     "cupboard_lower",
     "box_lid_top",
     "box_storage",
+    "grill-top",
+    "plate-top",
+    "plate_boundary",
+    "dish_rack",
     "groceries_boundary",
     "placement_boundary",
     "table",
@@ -37,6 +41,10 @@ REGION_DESCRIPTIONS = {
     "placement_boundary": "in placement area",
     "table": "on table",
     "box_inside_fallback": "inside broad box fallback",
+    "grill-top": "on grill top",
+    "plate-top": "on plate",
+    "plate_boundary": "at plate boundary",
+    "dish_rack": "at dish rack",
 }
 
 REGION_PADDING = {
@@ -48,6 +56,10 @@ REGION_PADDING = {
     "placement_boundary": 0.05,
     "table": 0.04,
     "box_inside_fallback": 0.04,
+    "grill-top": 0.08,
+    "plate-top": 0.05,
+    "plate_boundary": 0.05,
+    "dish_rack": 0.06,
 }
 
 REGION_Z_MARGIN = {
@@ -59,6 +71,10 @@ REGION_Z_MARGIN = {
     "placement_boundary": (0.15, 0.20),
     "table": (0.05, 0.12),
     "box_inside_fallback": (0.15, 0.20),
+    "grill-top": (0.08, 0.18),
+    "plate-top": (0.05, 0.12),
+    "plate_boundary": (0.05, 0.12),
+    "dish_rack": (0.10, 0.18),
 }
 
 
