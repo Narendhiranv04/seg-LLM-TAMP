@@ -17,6 +17,10 @@ KITCHEN_REGION_ALIASES = {
     "shelf_lower": "cupboard_lower",
 }
 
+GRILL_REGION_ALIASES = {
+    "plate-boundary": "plate_boundary",
+}
+
 CANONICAL_KITCHEN_REGION_ORDER = (
     "table",
     "placement_boundary",
@@ -26,6 +30,14 @@ CANONICAL_KITCHEN_REGION_ORDER = (
     "groceries_boundary",
     "box_lid_top",
     "box_inside_fallback",
+)
+
+CANONICAL_GRILL_REGION_ORDER = (
+    "table",
+    "grill-top",
+    "plate-top",
+    "plate_boundary",
+    "dish_rack",
 )
 
 BOX_STORAGE_REGION = "box_storage"
@@ -55,7 +67,8 @@ REGION_SEMANTICS = {
 
 def normalize_region_name(region_name: str | None) -> str:
     token = str(region_name or "").strip()
-    return KITCHEN_REGION_ALIASES.get(token, token)
+    canonical = KITCHEN_REGION_ALIASES.get(token, token)
+    return GRILL_REGION_ALIASES.get(canonical, canonical)
 
 
 def region_semantics(region_name: str | None) -> str:

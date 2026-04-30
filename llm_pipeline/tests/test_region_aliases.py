@@ -15,3 +15,8 @@ def test_normalize_region_names_deduplicates_aliases() -> None:
         "box_storage",
         "box_lid_top",
     ]
+
+
+def test_grill_region_aliases_normalize_to_public_symbols() -> None:
+    assert normalize_region_name("plate-boundary") == "plate_boundary"
+    assert normalize_region_names(["plate-boundary", "plate_boundary"]) == ["plate_boundary"]

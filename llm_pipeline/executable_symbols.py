@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Optional, Tuple
 
-from llm_pipeline.region_aliases import CANONICAL_KITCHEN_REGION_ORDER, normalize_region_names
+from llm_pipeline.region_aliases import (
+    CANONICAL_GRILL_REGION_ORDER,
+    CANONICAL_KITCHEN_REGION_ORDER,
+    normalize_region_names,
+)
 
 
 ACTION_SYMBOLS: Tuple[str, ...] = ("move", "pick", "place", "open")
@@ -32,14 +36,7 @@ GRILL_OBJECT_ORDER: Tuple[str, ...] = (
     "lid",
 )
 DEFAULT_REGION_ORDER: Tuple[str, ...] = CANONICAL_KITCHEN_REGION_ORDER
-GRILL_REGION_ORDER: Tuple[str, ...] = (
-    "grill-top",
-    "plate-top",
-    "plate_boundary",
-    "plate-boundary",
-    "plate",
-    "dish_rack",
-)
+GRILL_REGION_ORDER: Tuple[str, ...] = CANONICAL_GRILL_REGION_ORDER
 EXECUTABLE_OBJECTS: Tuple[str, ...] = DEFAULT_OBJECT_ORDER
 EXECUTABLE_REGIONS: Tuple[str, ...] = DEFAULT_REGION_ORDER
 
@@ -131,15 +128,27 @@ def _objects_from_detected(detected_objects=None, env=None) -> Tuple[str, ...]:
     return _ordered_known_then_extras(candidates, known_order) or EXECUTABLE_OBJECTS
 
 
+def _is_grill_env(env) -> bool:
+    if env is None:
+        return False
+    module_name = env.__class__.__module__.lower()
+    class_name = env.__class__.__name__.lower()
+    if "grill" in module_name or "grill" in class_name:
+        return True
+    return hasattr(env, "grill_lid") or hasattr(env, "grill_boundary")
+
+
 def _regions_from_env(env) -> Tuple[str, ...]:
     if env is None:
         return EXECUTABLE_REGIONS
 
     region_map = getattr(env, "regions", {}) or {}
-    known_order = DEFAULT_REGION_ORDER + tuple(
-        name for name in GRILL_REGION_ORDER if name not in set(DEFAULT_REGION_ORDER)
-    )
-    names = _ordered_known_then_extras(normalize_region_names(region_map.keys()), known_order)
+    if _is_grill_env(env):
+        region_set = set(normalize_region_names(region_map.keys()))
+        names = tuple(region for region in GRILL_REGION_ORDER if region in region_set)
+        return names or GRILL_REGION_ORDER
+
+    names = _ordered_known_then_extras(normalize_region_names(region_map.keys()), DEFAULT_REGION_ORDER)
     return names or EXECUTABLE_REGIONS
 
 
