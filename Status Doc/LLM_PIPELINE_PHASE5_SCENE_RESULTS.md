@@ -23,9 +23,9 @@ BLOCKED = the scene could not be launched or checked.
 ```text
 Date: 2026-04-30
 Tester: manual terminal runs
-Branch/commit: kitchen-region-rename-latest / through d4ce4b0
+Branch/commit: kitchen-region-rename-latest / through 64210d9
 Command(s): python llm_pipeline/debug_state_builder.py --variant <scene> --skip-prompt --json
-Notes: Kitchen static scene-state reports now pass with geometric region assignments. Grill validation has moved forward with G1 passing; G2/G3 still need fresh static and dynamic checks.
+Notes: Kitchen static scene-state reports now pass with geometric region assignments. Grill work is in progress: supported regions are now grill-specific in code, and grill semantic facts are reported separately from raw geometric regions. Fresh G1/G2/G3 reports are needed after these changes.
 ```
 
 ## Manual Verification Plan
@@ -38,8 +38,9 @@ Current immediate focus:
 
 1. Kitchen static snapshots are concrete enough to move on.
 2. Grill domain next.
-3. Start with base static scene-state reports for G1, G2, and G3.
-4. After static grill accuracy is understood, test progression/dynamic snapshots
+3. Re-run base static scene-state reports for G1, G2, and G3 with grill-specific supported regions.
+4. Check that meat on `grill-top` is not treated as `inside_grill` unless a later explicit grill-containment fact supports it.
+5. After static grill accuracy is understood, test progression/dynamic snapshots
    after actions such as opening the grill and moving meat to the plate.
 
 ## K1
@@ -70,7 +71,7 @@ Current immediate focus:
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PASS | Yes | Yes | Yes | Latest report `20260430_211632_G1_scene_state.md`: detected spam, chicken, plate, grill_lid. Geometric assignments resolve spam to grill-top, plate to dish_rack, and chicken/grill_lid to table. Chicken and grill_lid still lack visual region evidence, so keep visual masks as debug-only evidence. |
+| Initial snapshot | PARTIAL | Yes | Partial | Partial | Report `20260430_211632_G1_scene_state.md` detected spam, chicken, plate, grill_lid, but exposed kitchen-only supported regions and overclaimed semantic readiness. Code now hides kitchen regions for grill and reports grill semantic facts; re-run this snapshot before marking PASS. |
 | After opening grill |  |  |  |  |  |
 | Other scenario |  |  |  |  |  |
 
