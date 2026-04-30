@@ -188,14 +188,15 @@ class FakeExecutor:
             self.step_callback()
 
         if len(self.calls) == 1:
-            self.completed_primitive_actions.append(rendered[0])
-            self.remaining_actions = rendered[1:]
+            pick_index = next(index for index, action in enumerate(actions) if action.action_name == 'pick')
+            self.completed_primitive_actions.extend(rendered[: pick_index + 1])
+            self.remaining_actions = rendered[pick_index + 1 :]
             self.held_object = 'mug2'
             failure = FailureEvent(
                 failure_id='placement_failed',
                 stage=FailureStage.AFTER_EXECUTION,
                 source=FailureSource.SEGMENTATION,
-                action=rendered[1],
+                action=self.remaining_actions[-1],
                 evidence={'target_region': 'placement_boundary'},
                 message='place failed after pick',
             )
@@ -256,14 +257,16 @@ def _snapshot() -> SegmentationSnapshot:
         gripper_evidence={},
         supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage', 'box_lid_top'],
         visible_regions=['box_storage', 'box_lid_top'],
+        object_region_map={'mug2': 'box_storage', 'box_lid': 'box_lid_top'},
+        object_region_descriptions={'mug2': 'inside the box storage target', 'box_lid': 'on top of the box lid'},
     )
 
 
 def test_pipeline_replans_with_previous_direct_actions() -> None:
     planner = QueuePlanner(
         [
-            'pick(mug2)\nplace(mug2, placement_boundary)',
-            'move\nplace(mug2, placement_boundary)\nopen(box_lid)',
+            'move\npick(mug2)\nmove\nplace(mug2, placement_boundary)',
+            'move\nplace(mug2, placement_boundary)\nmove\nopen(box_lid)',
         ]
     )
     snapshot = _snapshot()
@@ -284,24 +287,26 @@ def test_pipeline_replans_with_previous_direct_actions() -> None:
     assert summary['success'] is True
     assert summary['total_replans'] == 1
     assert summary['completed_actions'] == [
+        'move(→pick)',
         'pick(mug2)',
-        'move',
+        'move(→place)',
         'place(mug2, placement_boundary)',
+        'move(→open)',
         'open(box_lid)',
     ]
-    assert 'PREVIOUS ACTIONS (already executed, do not repeat):' in planner.requests[1]['user_prompt']
+    assert '=== REPLANNING AFTER FAILURE ===' in planner.requests[1]['user_prompt']
+    assert 'COMPLETED_ACTIONS: move(→pick), pick(mug2)' in planner.requests[1]['user_prompt']
     assert 'pick(mug2)' in planner.requests[1]['user_prompt']
-    assert 'FAILURE CONTEXT:' in planner.requests[1]['user_prompt']
-    assert 'remaining_actions=place(mug2, placement_boundary)' in planner.requests[1]['user_prompt']
-    assert 'CURRENT SEGMENTATION SNAPSHOT:' in planner.requests[0]['user_prompt']
-    assert 'mask_regions=box_storage' in planner.requests[0]['user_prompt']
+    assert 'ERROR: place failed after pick' in planner.requests[1]['user_prompt']
+    assert '## Object States (Geometric):' in planner.requests[0]['user_prompt']
+    assert 'region=box_storage' in planner.requests[0]['user_prompt']
     assert segmentation_adapter.refresh_calls[:2] == ['initial', 'initial']
     assert segmentation_adapter.action_sequence_calls[0]['actions'] == []
     assert segmentation_adapter.live_updates >= 1
 
 
 def test_pipeline_preflight_reports_no_image_input() -> None:
-    planner = QueuePlanner(['open(box_lid)'])
+    planner = QueuePlanner(['move\nopen(box_lid)'])
     snapshot = _snapshot()
     segmentation_adapter = FakeSegmentationAdapter(snapshot)
     pipeline = LLMOnlyReplanningPipeline(
@@ -323,7 +328,7 @@ def test_pipeline_preflight_reports_no_image_input() -> None:
 
 
 def test_pipeline_reports_validation_failure_before_execution() -> None:
-    planner = MockTextLLMPlanner(scripted_output='1. pick(mug2)')
+    planner = MockTextLLMPlanner(scripted_output='1. pick(mug_box)')
     snapshot = _snapshot()
     segmentation_adapter = FakeSegmentationAdapter(snapshot)
     pipeline = LLMOnlyReplanningPipeline(
@@ -344,7 +349,7 @@ def test_pipeline_reports_validation_failure_before_execution() -> None:
 
 
 def test_pipeline_plan_only_mode_skips_execution_and_failure_checks() -> None:
-    planner = QueuePlanner(['move\npick(mug2)\nplace(mug2, placement_boundary)'])
+    planner = QueuePlanner(['move\npick(mug2)\nmove\nplace(mug2, placement_boundary)'])
     snapshot = _snapshot()
     segmentation_adapter = FakeSegmentationAdapter(snapshot)
     failure_checker = FakeFailureChecker(segmentation_adapter, snapshot)
@@ -375,14 +380,16 @@ def test_pipeline_plan_only_mode_skips_execution_and_failure_checks() -> None:
     assert summary['pre_action_checks_enabled'] is False
     assert summary['post_action_checks_enabled'] is False
     assert summary['planned_actions'] == [
-        'move',
+        'move(→pick)',
         'pick(mug2)',
+        'move(→place)',
         'place(mug2, placement_boundary)',
     ]
     assert summary['completed_actions'] == []
     assert summary['remaining_actions'] == [
-        'move',
+        'move(→pick)',
         'pick(mug2)',
+        'move(→place)',
         'place(mug2, placement_boundary)',
     ]
     assert summary['total_cycles'] == 1

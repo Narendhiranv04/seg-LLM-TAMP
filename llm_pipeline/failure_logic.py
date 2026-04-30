@@ -151,15 +151,22 @@ class SegmentationFirstFailureChecker:
                     message=f'{object_name} is no longer visible after place execution',
                 )
 
-            if target_region in {normalize_region_name(region) for region in evidence.mask_regions}:
+            object_region_map = getattr(snapshot, 'object_region_map', {}) or {}
+            observed_region = normalize_region_name(object_region_map.get(object_name))
+            if observed_region and observed_region == target_region:
                 return self._maybe_new_visibility_failure(action, snapshot)
             return FailureEvent(
                 failure_id='placement_failed',
                 stage=FailureStage.AFTER_EXECUTION,
-                source=FailureSource.SEGMENTATION,
+                source=FailureSource.GEOMETRY,
                 action=str(action),
-                evidence={**evidence.to_dict(), 'target_region': target_region},
-                message=f'{object_name} is not observed in target region {target_region} after place execution',
+                evidence={
+                    **evidence.to_dict(),
+                    'target_region': target_region,
+                    'geometric_region': observed_region or None,
+                    'object_region_map': dict(object_region_map),
+                },
+                message=f'{object_name} is geometrically resolved in {observed_region or "(unresolved)"}, not target region {target_region}',
             )
 
         if not self.adapter.is_lid_open(snapshot):

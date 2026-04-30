@@ -24,7 +24,7 @@ adapter = FakeAdapter()
 checker = SegmentationFirstFailureChecker(adapter=adapter, env=None)
 
 
-def _snapshot(object_evidence, newly_visible=None, visible_regions=None):
+def _snapshot(object_evidence, newly_visible=None, visible_regions=None, object_region_map=None):
     return SegmentationSnapshot(
         frame_index=1,
         visible_objects=sorted([name for name, evidence in object_evidence.items() if evidence.visible]),
@@ -33,6 +33,7 @@ def _snapshot(object_evidence, newly_visible=None, visible_regions=None):
         gripper_evidence={},
         supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage'],
         visible_regions=list(visible_regions or []),
+        object_region_map=dict(object_region_map or {}),
     )
 
 
@@ -56,6 +57,7 @@ def test_postcheck_flags_bad_place_region() -> None:
             'mug2': SegmentationObjectEvidence(name='mug2', visible=True, mask_regions=['cupboard_lower']),
         },
         visible_regions=['cupboard_lower'],
+        object_region_map={'mug2': 'cupboard_lower'},
     )
     failure = checker.postcheck(
         DirectAction('place', ('mug2', 'placement_boundary')),
@@ -65,6 +67,23 @@ def test_postcheck_flags_bad_place_region() -> None:
     assert failure is not None
     assert failure.failure_id == 'placement_failed'
     assert failure.stage == FailureStage.AFTER_EXECUTION
+    assert failure.source == FailureSource.GEOMETRY
+
+
+def test_postcheck_uses_geometric_region_instead_of_mask_regions() -> None:
+    snapshot = _snapshot(
+        {
+            'mug2': SegmentationObjectEvidence(name='mug2', visible=True, mask_regions=['table']),
+        },
+        visible_regions=['table'],
+        object_region_map={'mug2': 'box_storage'},
+    )
+    failure = checker.postcheck(
+        DirectAction('place', ('mug2', 'box_storage')),
+        held_object=None,
+        snapshot=snapshot,
+    )
+    assert failure is None
 
 
 def test_postcheck_triggers_replan_for_new_visibility() -> None:
