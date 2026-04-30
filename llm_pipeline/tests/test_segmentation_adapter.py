@@ -31,6 +31,8 @@ class FakeDetector:
         self.pixel_totals = {}
         self.object_region_membership = {}
         self.known_objects = set()
+        self.object_poses = {}
+        self.region_bboxes = {}
 
     def update(self):
         return set(self.current_visible)
@@ -49,6 +51,12 @@ class FakeDetector:
     def reset_known(self):
         self.known_objects = set()
         self.newly_detected = set()
+
+    def get_object_pose(self, name):
+        return self.object_poses.get(name)
+
+    def get_bounding_box(self, name):
+        return self.region_bboxes.get(name)
 
 
 class FakeViewer:
@@ -113,6 +121,23 @@ def test_segmentation_adapter_fuses_mask_regions_and_discovery() -> None:
     assert second_snapshot.newly_visible_objects == ['box_lid']
     assert adapter.is_lid_open(second_snapshot) is True
     assert adapter.blocking_objects_for_lid(first_snapshot) == ['mug2']
+
+
+def test_segmentation_adapter_adds_geometric_object_regions() -> None:
+    detector = FakeDetector()
+    detector.current_visible = {'mug2'}
+    detector.newly_detected = {'mug2'}
+    detector.object_poses = {'mug2': (0.0, 0.0, 0.34)}
+    detector.region_bboxes = {
+        'box_boundary': ((-0.2, -0.2, 0.0), (0.2, 0.2, 0.25)),
+        'box_lid': ((-0.2, -0.2, 0.30), (0.2, 0.2, 0.32)),
+    }
+
+    mask = _empty_mask()
+    mask[3:5, 4:6] = 1
+    snapshot = SegmentationEvidenceAdapter(detector=detector).capture_snapshot({'overhead': mask})
+
+    assert snapshot.object_region_map['mug2'] == 'box_lid_top'
 
 
 def test_segmentation_adapter_refreshes_direct_detector_and_live_view_methods() -> None:

@@ -122,6 +122,8 @@ class SegmentationSnapshot:
     gripper_evidence: Dict[str, Any] = field(default_factory=dict)
     supported_regions: List[str] = field(default_factory=list)
     visible_regions: List[str] = field(default_factory=list)
+    object_region_map: Dict[str, str] = field(default_factory=dict)
+    object_region_descriptions: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -135,6 +137,8 @@ class SegmentationSnapshot:
             "gripper_evidence": dict(self.gripper_evidence),
             "supported_regions": list(self.supported_regions),
             "visible_regions": list(self.visible_regions),
+            "object_region_map": dict(self.object_region_map),
+            "object_region_descriptions": dict(self.object_region_descriptions),
         }
 
 
@@ -175,6 +179,8 @@ class SceneState:
     images: Optional[List[np.ndarray]] = None  # Stitched or raw RGB views
     gripper_state: Dict[str, Any] = field(default_factory=dict)
     region_map: Dict[str, Tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)  # region -> (min, max)
+    object_region_map: Dict[str, str] = field(default_factory=dict)  # obj -> canonical region
+    object_region_descriptions: Dict[str, str] = field(default_factory=dict)  # obj -> human-readable location
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -184,6 +190,8 @@ class SceneState:
             "pddl_state": list(self.pddl_state),
             "pose_map": {k: list(v) for k, v in self.pose_map.items()},
             "gripper_state": dict(self.gripper_state),
+            "object_region_map": dict(self.object_region_map),
+            "object_region_descriptions": dict(self.object_region_descriptions),
         }
 
 

@@ -18,6 +18,7 @@ from llm_pipeline.prompt_builder import TextOnlyContextBuilder
 from llm_pipeline.segmentation_adapter import SegmentationEvidenceAdapter
 from llm_pipeline.strict_parser import StrictActionParser
 from llm_pipeline.region_aliases import scene_object_for_region
+from llm_pipeline.region_geometry import resolve_object_regions
 from llm_pipeline.pipeline_types import (
     DirectAction, FailureEvent, PlanResult, ICLMode, SceneState,
     BasePlanner, BaseContextBuilder
@@ -266,9 +267,9 @@ class LLMOnlyReplanningPipeline:
         debug_snapshot = self.get_debug_snapshot()
         bundle = prompt_trace.get('bundle', {})
         prompt_contract_issues = []
-        if any('image' in key for key in bundle):
+        if any('image' in key and bundle.get(key) for key in bundle):
             prompt_contract_issues.append('image_key_in_prompt_bundle')
-        if debug_snapshot and any('image' in key for key in debug_snapshot):
+        if debug_snapshot and any('image' in key and debug_snapshot.get(key) for key in debug_snapshot):
             prompt_contract_issues.append('image_key_in_debug_snapshot')
         return {
             'model_alias': getattr(self.planner, 'model_alias', self.config.model_alias),
@@ -301,7 +302,11 @@ class LLMOnlyReplanningPipeline:
             state=state,
             goal_text=goal_text,
             failure_event=failure_event,
-            previous_actions=[str(r.planned_actions) for r in self.cycles],
+            previous_actions=[
+                action
+                for cycle in self.cycles
+                for action in cycle.completed_actions
+            ],
             icl_mode=self.config.icl_mode
         )
 
@@ -379,6 +384,15 @@ class LLMOnlyReplanningPipeline:
                     # bb is (min, max)
                     region_map[region_name] = (np.array(bb[0]), np.array(bb[1]))
 
+        object_region_map, object_region_descriptions = resolve_object_regions(
+            {name: tuple(pose[:3]) for name, pose in pose_map.items()},
+            region_map,
+            snapshot.supported_regions,
+        )
+        if not object_region_map:
+            object_region_map = dict(getattr(snapshot, 'object_region_map', {}) or {})
+            object_region_descriptions = dict(getattr(snapshot, 'object_region_descriptions', {}) or {})
+
         state = SceneState(
             frame_index=snapshot.frame_index,
             visible_objects=snapshot.visible_objects,
@@ -386,6 +400,8 @@ class LLMOnlyReplanningPipeline:
             masks=snapshot.gripper_evidence.get('masks', {}),
             pose_map=pose_map,
             region_map=region_map,
+            object_region_map=object_region_map,
+            object_region_descriptions=object_region_descriptions,
             gripper_state={'status': 'holding' if getattr(self.executor, 'held_object', None) else 'empty',
                            'holding': getattr(self.executor, 'held_object', None)}
         )

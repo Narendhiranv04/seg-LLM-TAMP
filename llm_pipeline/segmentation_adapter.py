@@ -10,11 +10,13 @@ import numpy as np
 
 from llm_pipeline.executable_symbols import RuntimeSymbolRegistry, build_runtime_symbol_registry
 from llm_pipeline.pipeline_types import SegmentationObjectEvidence, SegmentationSnapshot
+from llm_pipeline.region_geometry import resolve_object_regions
 from llm_pipeline.region_aliases import (
     BOX_LID_TOP_REGION,
     BOX_STORAGE_REGION,
     normalize_region_name,
     normalize_region_names,
+    scene_object_for_region,
 )
 
 try:
@@ -283,6 +285,11 @@ class SegmentationEvidenceAdapter:
                 gripper_proximity=gripper_proximity,
             )
 
+        object_region_map, object_region_descriptions = self._resolve_geometric_regions(
+            visible_now,
+            valid_regions,
+        )
+
         return SegmentationSnapshot(
             frame_index=self.frame_index,
             visible_objects=visible_now,
@@ -294,7 +301,36 @@ class SegmentationEvidenceAdapter:
             },
             supported_regions=list(self.symbol_registry.regions),
             visible_regions=self._ordered_tokens(visible_regions, self.symbol_registry.regions),
+            object_region_map=object_region_map,
+            object_region_descriptions=object_region_descriptions,
         )
+
+    def _resolve_geometric_regions(self, visible_objects, valid_regions):
+        if self.detector is None:
+            return {}, {}
+
+        pose_map = {}
+        for object_name in visible_objects:
+            try:
+                pose = self.detector.get_object_pose(object_name)
+            except Exception:
+                pose = None
+            if pose:
+                pose_map[object_name] = tuple(pose[:3])
+
+        region_map = {}
+        for region_name in self.symbol_registry.regions:
+            canonical = normalize_region_name(region_name)
+            if canonical not in valid_regions:
+                continue
+            try:
+                bb = self.detector.get_bounding_box(scene_object_for_region(canonical))
+            except Exception:
+                bb = None
+            if bb:
+                region_map[canonical] = (np.array(bb[0]), np.array(bb[1]))
+
+        return resolve_object_regions(pose_map, region_map, valid_regions)
 
     def is_lid_open(self, snapshot: SegmentationSnapshot) -> bool:
         if self.env is not None:
