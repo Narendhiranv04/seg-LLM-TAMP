@@ -15,6 +15,8 @@ from llm_pipeline.region_aliases import (
 
 RegionBounds = Tuple[np.ndarray, np.ndarray]
 
+NON_REGION_OBJECTS = frozenset({"box_lid", "cupboard"})
+
 PRIMARY_REGION_PRIORITY = (
     "cupboard_upper",
     "cupboard_lower",
@@ -134,6 +136,8 @@ def resolve_object_regions(
     object_region_map = {}
     object_region_descriptions = {}
     for object_name, pose in (pose_map or {}).items():
+        if object_name in NON_REGION_OBJECTS:
+            continue
         region_name, description = resolve_region(tuple(pose[:3]), region_map, valid_regions)
         object_region_map[object_name] = region_name
         object_region_descriptions[object_name] = description

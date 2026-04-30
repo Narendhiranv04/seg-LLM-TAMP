@@ -59,3 +59,20 @@ def test_resolve_object_regions_returns_maps() -> None:
 
     assert object_region_map == {'mug3': 'cupboard_lower'}
     assert descriptions['mug3'] == 'on lower cupboard shelf'
+
+
+def test_resolve_object_regions_skips_non_region_fixtures() -> None:
+    pose_map = {
+        'box_lid': (0.0, 0.0, 0.34),
+        'cupboard': (0.6, 0.0, 0.45),
+        'mug2': (0.0, 0.0, 0.34),
+    }
+    region_map = {
+        'box_lid_top': _bounds(-0.2, -0.2, 0.30, 0.2, 0.2, 0.32),
+        'cupboard_lower': _bounds(0.45, -0.15, 0.35, 0.85, 0.15, 0.38),
+    }
+
+    object_region_map, descriptions = resolve_object_regions(pose_map, region_map)
+
+    assert object_region_map == {'mug2': 'box_lid_top'}
+    assert descriptions == {'mug2': 'on top of the box lid'}

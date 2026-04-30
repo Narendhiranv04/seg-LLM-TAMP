@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from llm_pipeline.region_geometry import NON_REGION_OBJECTS
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -125,7 +127,7 @@ def _format_scene_report(
     if not visible_objects:
         result = "FAIL"
         result_note = "No visible objects were detected."
-    elif any(name not in object_region_map for name in visible_objects):
+    elif any(name not in object_region_map and name not in NON_REGION_OBJECTS for name in visible_objects):
         result = "PARTIAL"
         result_note = "Objects were detected, but one or more objects have missing geometric region assignment."
     else:
@@ -166,11 +168,16 @@ def _format_scene_report(
         ])
         for name in sorted(visible_objects):
             evidence = object_evidence.get(name, {})
+            geometric_region = object_region_map.get(name)
+            description = object_region_descriptions.get(name)
+            if name in NON_REGION_OBJECTS:
+                geometric_region = geometric_region or "(not applicable)"
+                description = description or "fixture/openable object"
             lines.append(
                 "| "
                 f"{name} | "
-                f"{object_region_map.get(name, '(unresolved)')} | "
-                f"{object_region_descriptions.get(name, '(none)')} | "
+                f"{geometric_region or '(unresolved)'} | "
+                f"{description or '(none)'} | "
                 f"{_format_list(evidence.get('mask_regions', []))} |"
             )
     else:

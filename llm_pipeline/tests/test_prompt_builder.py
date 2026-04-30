@@ -40,8 +40,8 @@ def _snapshot() -> SegmentationSnapshot:
         gripper_evidence={},
         supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage'],
         visible_regions=['box_storage'],
-        object_region_map={'mug2': 'box_storage', 'box_lid': 'box_lid_top'},
-        object_region_descriptions={'mug2': 'inside the box storage target', 'box_lid': 'on top of the box lid'},
+        object_region_map={'mug2': 'box_storage'},
+        object_region_descriptions={'mug2': 'inside the box storage target'},
     )
 
 
