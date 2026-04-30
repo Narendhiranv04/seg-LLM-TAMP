@@ -47,8 +47,23 @@ class TextOnlyContextBuilder(BaseContextBuilder):
         snapshot = getattr(state, '_original_snapshot', None)
         held_object = state.gripper_state.get('holding')
 
-        observation_text = self._build_observation_text(snapshot=snapshot, held_object=held_object)
-        visible_text = self._build_visible_text(snapshot=snapshot)
+        object_region_map = getattr(state, 'object_region_map', {}) or getattr(snapshot, 'object_region_map', {}) or {}
+        object_region_descriptions = (
+            getattr(state, 'object_region_descriptions', {})
+            or getattr(snapshot, 'object_region_descriptions', {})
+            or {}
+        )
+
+        observation_text = self._build_observation_text(
+            snapshot=snapshot,
+            held_object=held_object,
+            object_region_map=object_region_map,
+            object_region_descriptions=object_region_descriptions,
+        )
+        visible_text = self._build_visible_text(
+            snapshot=snapshot,
+            object_region_map=object_region_map,
+        )
 
         # 2. Create the intermediate text bundle
         text_bundle = TextPromptBundle(
@@ -131,6 +146,8 @@ class TextOnlyContextBuilder(BaseContextBuilder):
         self,
         snapshot: Optional[SegmentationSnapshot],
         held_object: Optional[str],
+        object_region_map: Optional[dict] = None,
+        object_region_descriptions: Optional[dict] = None,
     ) -> str:
         visible_objects = list(snapshot.visible_objects) if snapshot is not None else []
         visible_regions = self._planner_visible_regions(snapshot.visible_regions) if snapshot is not None else []
@@ -158,6 +175,12 @@ class TextOnlyContextBuilder(BaseContextBuilder):
                 lines.append(f'- {name}: visible=true')
                 continue
             facts = []
+            region_name = (object_region_map or {}).get(name)
+            if region_name and normalize_region_name(region_name) not in set(PLANNER_HIDDEN_REGIONS):
+                facts.append(f'region={region_name}')
+                description = (object_region_descriptions or {}).get(name)
+                if description:
+                    facts.append(f'region_description={description}')
             if evidence.camera_hits:
                 facts.append(f'camera_hits={"|".join(evidence.camera_hits)}')
             if evidence.camera_pixels:
@@ -166,7 +189,7 @@ class TextOnlyContextBuilder(BaseContextBuilder):
                 facts.append(f'pixel_count={evidence.pixel_count}')
             mask_regions = self._planner_visible_regions(evidence.mask_regions)
             if mask_regions:
-                facts.append(f'mask_regions={"|".join(mask_regions)}')
+                facts.append(f'visual_mask_regions={"|".join(mask_regions)}')
             if evidence.centroid:
                 facts.append(f'centroids={self._format_point_map(evidence.centroid)}')
             if evidence.bbox:
@@ -179,7 +202,7 @@ class TextOnlyContextBuilder(BaseContextBuilder):
 
         return '\n'.join(lines)
 
-    def _build_visible_text(self, snapshot: Optional[SegmentationSnapshot]) -> str:
+    def _build_visible_text(self, snapshot: Optional[SegmentationSnapshot], object_region_map: Optional[dict] = None) -> str:
         visible_objects = list(snapshot.visible_objects) if snapshot is not None else []
         newly_visible = list(snapshot.newly_visible_objects) if snapshot is not None else []
         visible_regions = self._planner_visible_regions(snapshot.visible_regions) if snapshot is not None else []
@@ -194,9 +217,12 @@ class TextOnlyContextBuilder(BaseContextBuilder):
             if evidence is None:
                 continue
             facts = []
+            region_name = (object_region_map or {}).get(name)
+            if region_name and normalize_region_name(region_name) not in set(PLANNER_HIDDEN_REGIONS):
+                facts.append(f'region={region_name}')
             mask_regions = self._planner_visible_regions(evidence.mask_regions)
             if mask_regions:
-                facts.append(f'mask_regions={"|".join(mask_regions)}')
+                facts.append(f'visual_mask_regions={"|".join(mask_regions)}')
             if evidence.camera_hits:
                 facts.append(f'camera_hits={"|".join(evidence.camera_hits)}')
             if evidence.pixel_count:

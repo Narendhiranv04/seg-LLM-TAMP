@@ -86,12 +86,16 @@ def _state_summary(state) -> dict[str, Any]:
         "valid_regions": list(state.valid_regions),
         "pose_map_keys": sorted(state.pose_map.keys()),
         "region_map_keys": sorted(state.region_map.keys()),
+        "object_region_map": dict(getattr(state, "object_region_map", {}) or {}),
+        "object_region_descriptions": dict(getattr(state, "object_region_descriptions", {}) or {}),
         "gripper_state": dict(state.gripper_state),
         "snapshot": None if snapshot is None else {
             "visible_objects": list(snapshot.visible_objects),
             "newly_visible_objects": list(snapshot.newly_visible_objects),
             "visible_regions": list(snapshot.visible_regions),
             "supported_regions": list(snapshot.supported_regions),
+            "object_region_map": dict(getattr(snapshot, "object_region_map", {}) or {}),
+            "object_region_descriptions": dict(getattr(snapshot, "object_region_descriptions", {}) or {}),
             "object_evidence": object_evidence,
             "gripper_evidence": dict(snapshot.gripper_evidence),
         },
@@ -115,16 +119,18 @@ def _format_scene_report(
     object_evidence = snapshot.get("object_evidence", {})
     visible_objects = summary["visible_objects"]
     visible_regions = snapshot.get("visible_regions", [])
+    object_region_map = summary.get("object_region_map", {})
+    object_region_descriptions = summary.get("object_region_descriptions", {})
 
     if not visible_objects:
         result = "FAIL"
         result_note = "No visible objects were detected."
-    elif any(len(evidence.get("mask_regions", [])) != 1 for evidence in object_evidence.values()):
+    elif any(name not in object_region_map for name in visible_objects):
         result = "PARTIAL"
-        result_note = "Objects were detected, but one or more objects have broad or missing region evidence."
+        result_note = "Objects were detected, but one or more objects have missing geometric region assignment."
     else:
         result = "PASS"
-        result_note = "Objects were detected with single-region evidence."
+        result_note = "Objects were detected with geometric region assignments."
 
     lines = [
         f"# Scene State Report: {variant_id}",
@@ -149,13 +155,36 @@ def _format_scene_report(
         f"- Pose map objects: {_format_list(summary['pose_map_keys'])}",
         f"- Gripper: {summary['gripper_state'].get('status', 'unknown')}",
         "",
-        "## Object Evidence",
+        "## Geometric Object Locations",
         "",
     ]
 
+    if visible_objects:
+        lines.extend([
+            "| Object | Geometric region | Description | Visual regions |",
+            "| --- | --- | --- | --- |",
+        ])
+        for name in sorted(visible_objects):
+            evidence = object_evidence.get(name, {})
+            lines.append(
+                "| "
+                f"{name} | "
+                f"{object_region_map.get(name, '(unresolved)')} | "
+                f"{object_region_descriptions.get(name, '(none)')} | "
+                f"{_format_list(evidence.get('mask_regions', []))} |"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.extend([
+        "",
+        "## Object Evidence",
+        "",
+    ])
+
     if object_evidence:
         lines.extend([
-            "| Object | Regions | Cameras | Pixels | Region votes |",
+            "| Object | Visual regions | Cameras | Pixels | Region votes |",
             "| --- | --- | --- | ---: | --- |",
         ])
         for name in sorted(object_evidence):
@@ -185,9 +214,9 @@ def _format_scene_report(
             evidence = object_evidence[name]
             regions = evidence.get("mask_regions", [])
             if len(regions) == 0:
-                lines.append(f"- {name}: no region evidence.")
+                lines.append(f"- {name}: no visual region evidence.")
             elif len(regions) > 1:
-                lines.append(f"- {name}: multiple region candidates ({_format_list(regions)}).")
+                lines.append(f"- {name}: multiple visual region candidates ({_format_list(regions)}).")
         if lines[-1] == "":
             lines.append("- No obvious region ambiguity in this snapshot.")
     else:

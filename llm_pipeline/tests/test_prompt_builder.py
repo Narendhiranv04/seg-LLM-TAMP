@@ -40,6 +40,8 @@ def _snapshot() -> SegmentationSnapshot:
         gripper_evidence={},
         supported_regions=['table', 'placement_boundary', 'cupboard_lower', 'cupboard_upper', 'box_storage'],
         visible_regions=['box_storage'],
+        object_region_map={'mug2': 'box_storage', 'box_lid': 'box_lid_top'},
+        object_region_descriptions={'mug2': 'inside the box storage target', 'box_lid': 'on top of the box lid'},
     )
 
 
@@ -49,6 +51,8 @@ def _state(snapshot: SegmentationSnapshot, held_object=None) -> SceneState:
         visible_objects=snapshot.visible_objects,
         valid_regions=snapshot.supported_regions,
         gripper_state={'status': 'holding' if held_object else 'empty', 'holding': held_object},
+        object_region_map=dict(snapshot.object_region_map),
+        object_region_descriptions=dict(snapshot.object_region_descriptions),
     )
     state._original_snapshot = snapshot
     return state
@@ -104,7 +108,8 @@ def test_prompt_bundle_stays_text_only() -> None:
     assert 'open(box_lid)' in user_prompt
     assert 'Return executable action lines only.' in user_prompt
     assert 'state_text' not in user_prompt
-    assert 'mask_regions=box_storage' in user_prompt
+    assert 'region=box_storage' in user_prompt
+    assert 'visual_mask_regions=box_storage' in user_prompt
     assert 'visible_regions=box_storage' in user_prompt
     assert 'box_lid_state' not in user_prompt
     assert 'region_hint=' not in user_prompt
@@ -139,6 +144,7 @@ def test_fallback_regions_are_hidden_from_llm_prompt() -> None:
         'box_inside_fallback',
         'cupboard_fallback',
     ]
+    snapshot.object_region_map = {'mug2': 'box_storage'}
 
     bundle = TextOnlyContextBuilder().build_bundle(
         state=_state(snapshot),

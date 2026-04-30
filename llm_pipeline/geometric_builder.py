@@ -8,6 +8,7 @@ from llm_pipeline.pipeline_types import (
     BaseContextBuilder, SceneState, PromptBundle, FailureEvent, ICLMode
 )
 from llm_pipeline.geometric_utils import resolve_region
+from llm_pipeline.region_aliases import PLANNER_HIDDEN_REGIONS, normalize_region_name
 
 
 class GeometricContextBuilder(BaseContextBuilder):
@@ -90,16 +91,25 @@ class GeometricContextBuilder(BaseContextBuilder):
             obs_lines.append(f"- holding: {state.gripper_state['holding']}")
         
         region_map = getattr(state, 'region_map', {}) # Fallback to state's pre-resolved map if available
+        object_region_map = getattr(state, 'object_region_map', {}) or {}
+        object_region_descriptions = getattr(state, 'object_region_descriptions', {}) or {}
+        valid_regions = [
+            region for region in state.valid_regions
+            if normalize_region_name(region) not in set(PLANNER_HIDDEN_REGIONS)
+        ]
+        if valid_regions:
+            obs_lines.append("\n## Valid Target Regions:")
+            obs_lines.append(", ".join(valid_regions))
         
         obs_lines.append("\n## Object States (Geometric):")
         for obj_name in state.visible_objects:
             pos = state.pose_map.get(obj_name)
             if pos:
-                # Resolve the 3D region (e.g. 'inside cupboard', 'on table')
-                # If the builder was initialized with a static region map, use it.
-                # Otherwise, use the PDDL-style facts from context if present.
-                r_id, r_desc = resolve_region(pos, region_map)
-                obs_lines.append(f"- {obj_name}: {r_desc} at pose {tuple(np.round(pos, 3))}")
+                r_id = object_region_map.get(obj_name)
+                r_desc = object_region_descriptions.get(obj_name)
+                if not r_id:
+                    r_id, r_desc = resolve_region(pos, region_map, state.valid_regions)
+                obs_lines.append(f"- {obj_name}: region={r_id}, description={r_desc}, pose={tuple(np.round(pos, 3))}")
             else:
                 obs_lines.append(f"- {obj_name}: visible but pose unresolved")
         
