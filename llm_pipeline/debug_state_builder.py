@@ -88,6 +88,7 @@ def _state_summary(state) -> dict[str, Any]:
         "valid_regions": list(state.valid_regions),
         "pose_map_keys": sorted(state.pose_map.keys()),
         "region_map_keys": sorted(state.region_map.keys()),
+        "pddl_state": list(state.pddl_state),
         "object_region_map": dict(getattr(state, "object_region_map", {}) or {}),
         "object_region_descriptions": dict(getattr(state, "object_region_descriptions", {}) or {}),
         "gripper_state": dict(state.gripper_state),
@@ -156,6 +157,10 @@ def _format_scene_report(
         f"- Supported regions: {_format_list(snapshot.get('supported_regions', []))}",
         f"- Pose map objects: {_format_list(summary['pose_map_keys'])}",
         f"- Gripper: {summary['gripper_state'].get('status', 'unknown')}",
+        "",
+        "## Semantic Facts",
+        "",
+        _format_list(summary.get("pddl_state", [])),
         "",
         "## Geometric Object Locations",
         "",
@@ -291,6 +296,8 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
             visible_objects_only=True,
             enable_vision=False,
             use_remote_planner=False,
+            task_family=variant.task_family,
+            scene_path=scene_path,
         )
         pipeline = LLMOnlyReplanningPipeline(config=config, planner=NoOpPlanner(), executor=NoOpExecutor())
         if not pipeline.initialize(env=env):

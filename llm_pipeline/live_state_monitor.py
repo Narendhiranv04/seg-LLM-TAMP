@@ -219,6 +219,8 @@ def monitor_live_state(args: argparse.Namespace) -> int:
             visible_objects_only=True,
             enable_vision=False,
             use_remote_planner=False,
+            task_family=variant.task_family,
+            scene_path=scene_path,
         )
         pipeline = LLMOnlyReplanningPipeline(config=config, planner=NoOpPlanner(), executor=NoOpExecutor())
         if not pipeline.initialize(env=env):

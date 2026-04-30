@@ -19,6 +19,7 @@ from llm_pipeline.segmentation_adapter import SegmentationEvidenceAdapter
 from llm_pipeline.strict_parser import StrictActionParser
 from llm_pipeline.region_aliases import scene_object_for_region
 from llm_pipeline.region_geometry import resolve_object_regions
+from llm_pipeline.grill_geometry import derive_grill_semantic_facts, infer_grill_lid_open
 from llm_pipeline.pipeline_types import (
     DirectAction, FailureEvent, PlanResult, ICLMode, SceneState,
     BasePlanner, BaseContextBuilder
@@ -398,10 +399,18 @@ class LLMOnlyReplanningPipeline:
             object_region_map = dict(getattr(snapshot, 'object_region_map', {}) or {})
             object_region_descriptions = dict(getattr(snapshot, 'object_region_descriptions', {}) or {})
 
+        pddl_state = []
+        if (self.config.task_family or '').strip().lower() == 'grill':
+            pddl_state = derive_grill_semantic_facts(
+                object_region_map,
+                lid_open=infer_grill_lid_open(self.env),
+            )
+
         state = SceneState(
             frame_index=snapshot.frame_index,
             visible_objects=snapshot.visible_objects,
             valid_regions=snapshot.supported_regions,
+            pddl_state=pddl_state,
             masks=snapshot.gripper_evidence.get('masks', {}),
             pose_map=pose_map,
             region_map=region_map,
