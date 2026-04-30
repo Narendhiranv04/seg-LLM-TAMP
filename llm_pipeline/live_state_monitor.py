@@ -30,6 +30,35 @@ from llm_pipeline.region_geometry import NON_REGION_OBJECTS
 DEFAULT_LIVE_REPORT_DIR = DEFAULT_REPORT_DIR.parent / "live_scene_state_reports"
 
 
+def _step_simulation(env: Any, *, headless: bool) -> None:
+    env.pr.step()
+    if not headless and hasattr(env.pr, "step_ui"):
+        try:
+            env.pr.step_ui()
+        except Exception:
+            pass
+
+
+def _advance_simulation_until_next_poll(
+    env: Any,
+    *,
+    seconds: float,
+    headless: bool,
+    step_sleep: float,
+) -> None:
+    if seconds <= 0:
+        _step_simulation(env, headless=headless)
+        return
+
+    deadline = time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        _step_simulation(env, headless=headless)
+        time.sleep(min(max(step_sleep, 0.0), remaining))
+
+
 def _compact_signature(summary: dict[str, Any]) -> dict[str, Any]:
     """Return the stable state subset used to detect meaningful live changes."""
     visible_objects = [
@@ -172,6 +201,7 @@ def monitor_live_state(args: argparse.Namespace) -> int:
     print(f"Scene: {scene_path}")
     print(f"Headless: {args.headless}")
     print(f"Poll interval: {args.poll_interval:.3f}s")
+    print(f"Simulation step sleep: {args.step_sleep:.3f}s")
     print(f"Output dir: {output_dir}")
 
     env = None
@@ -198,7 +228,7 @@ def monitor_live_state(args: argparse.Namespace) -> int:
         if args.settle_steps > 0:
             print(f"[Live] Settling for {args.settle_steps} extra steps...")
             for _ in range(args.settle_steps):
-                env.pr.step()
+                _step_simulation(env, headless=args.headless)
 
         while True:
             if args.max_seconds > 0 and (time.monotonic() - start_time) >= args.max_seconds:
@@ -239,8 +269,12 @@ def monitor_live_state(args: argparse.Namespace) -> int:
                     print(f"  - {change}")
                 previous_signature = signature
 
-            if args.poll_interval > 0:
-                time.sleep(args.poll_interval)
+            _advance_simulation_until_next_poll(
+                env,
+                seconds=args.poll_interval,
+                headless=args.headless,
+                step_sleep=args.step_sleep,
+            )
 
         print(f"[Live] Done. Polls={polls}, captures={captured_frames}")
         return 0
@@ -285,6 +319,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.5,
         help="Seconds between scene-state polls.",
+    )
+    parser.add_argument(
+        "--step-sleep",
+        type=float,
+        default=0.02,
+        help="Seconds to sleep between simulator steps while waiting for the next poll.",
     )
     parser.add_argument(
         "--max-captures",
