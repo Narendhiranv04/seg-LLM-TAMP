@@ -15,7 +15,7 @@ from llm_pipeline.region_aliases import (
 
 RegionBounds = Tuple[np.ndarray, np.ndarray]
 
-NON_REGION_OBJECTS = frozenset({"box_lid", "cupboard"})
+NON_REGION_OBJECTS = frozenset({"box_lid"})
 
 PRIMARY_REGION_PRIORITY = (
     "cupboard_upper",

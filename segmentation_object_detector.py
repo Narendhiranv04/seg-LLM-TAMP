@@ -58,7 +58,7 @@ class SegmentationObjectDetector:
         default_task_objects = {
             'mug1', 'mug2', 'mug3', 'mug4',
             'soup', 'mustard', 'spam', 'sugar', 'crackers',
-            'box_lid', 'cupboard'
+            'box_lid'
         }
         env_task_objects = {
             str(name).strip()
@@ -77,7 +77,6 @@ class SegmentationObjectDetector:
             'sugar': ['sugar', 'food_box'],
             'crackers': ['crackers', 'cereal'],
             'box_lid': ['box_lid'],
-            'cupboard': ['cupboard'],
             'steak': ['steak', 'steak_visual'],
             'chicken': ['chicken', 'chicken_visual'],
             'meat1': ['meat1', 'steak', 'steak_visual'],
@@ -267,8 +266,6 @@ class SegmentationObjectDetector:
             return 'mug1'
         if 'box_lid' in n:
             return 'box_lid'
-        if 'cupboard' in n:
-            return 'cupboard'
         if 'plate' in n and 'boundary' not in n:
             return 'plate'
         if 'steak' in n:
