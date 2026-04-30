@@ -345,8 +345,13 @@ class LLMOnlyReplanningPipeline:
             print(f'[LLM] Plan FAILED: {result.error_message}')
         print(f'{"=" * 60}')
 
+        bundle_trace = {
+            key: value
+            for key, value in bundle.__dict__.items()
+            if value is not None and not (key in {'images', 'image_paths'} and not value)
+        }
         self.last_prompt_trace = {
-            'bundle': bundle.__dict__.copy(),
+            'bundle': bundle_trace,
             'state': state.to_dict(),
             'system_prompt': bundle.system_prompt,
             'user_prompt': bundle.user_prompt,

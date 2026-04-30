@@ -104,12 +104,14 @@ class GeometricContextBuilder(BaseContextBuilder):
         obs_lines.append("\n## Object States (Geometric):")
         for obj_name in state.visible_objects:
             pos = state.pose_map.get(obj_name)
+            r_id = object_region_map.get(obj_name)
+            r_desc = object_region_descriptions.get(obj_name)
             if pos:
-                r_id = object_region_map.get(obj_name)
-                r_desc = object_region_descriptions.get(obj_name)
                 if not r_id:
                     r_id, r_desc = resolve_region(pos, region_map, state.valid_regions)
                 obs_lines.append(f"- {obj_name}: region={r_id}, description={r_desc}, pose={tuple(np.round(pos, 3))}")
+            elif r_id:
+                obs_lines.append(f"- {obj_name}: region={r_id}, description={r_desc or '(none)'}, pose=unresolved")
             else:
                 obs_lines.append(f"- {obj_name}: visible but pose unresolved")
         
