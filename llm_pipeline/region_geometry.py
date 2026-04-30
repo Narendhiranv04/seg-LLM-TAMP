@@ -35,19 +35,17 @@ REGION_DESCRIPTIONS = {
     "placement_boundary": "in placement area",
     "table": "on table",
     "box_inside_fallback": "inside broad box fallback",
-    "cupboard_fallback": "inside broad cupboard fallback",
 }
 
 REGION_PADDING = {
-    "cupboard_upper": 0.05,
-    "cupboard_lower": 0.05,
+    "cupboard_upper": 0.10,
+    "cupboard_lower": 0.10,
     "box_lid_top": 0.04,
     "box_storage": 0.05,
     "groceries_boundary": 0.05,
     "placement_boundary": 0.05,
     "table": 0.04,
     "box_inside_fallback": 0.04,
-    "cupboard_fallback": 0.04,
 }
 
 REGION_Z_MARGIN = {
@@ -59,7 +57,6 @@ REGION_Z_MARGIN = {
     "placement_boundary": (0.15, 0.20),
     "table": (0.05, 0.12),
     "box_inside_fallback": (0.15, 0.20),
-    "cupboard_fallback": (0.20, 0.25),
 }
 
 
@@ -109,8 +106,6 @@ def point_matches_region(point: Tuple[float, float, float], region_name: str, bo
     z = float(point[2])
 
     if canonical == BOX_INSIDE_FALLBACK_REGION:
-        return z >= z_min - below and z <= z_max + above
-    if canonical == "cupboard_fallback":
         return z >= z_min - below and z <= z_max + above
     if (z_max - z_min) < 0.01:
         return z >= z_min - below and z <= z_min + above

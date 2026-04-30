@@ -19,13 +19,12 @@ def test_box_lid_top_beats_box_storage_and_table() -> None:
     assert region == 'box_lid_top'
 
 
-def test_cupboard_lower_beats_cupboard_fallback() -> None:
+def test_cupboard_lower_handles_nearby_lower_shelf_objects() -> None:
     region_map = {
-        'cupboard_fallback': _bounds(0.4, -0.2, 0.0, 0.9, 0.2, 1.2),
         'cupboard_lower': _bounds(0.45, -0.15, 0.35, 0.85, 0.15, 0.38),
     }
 
-    region, _ = resolve_region((0.6, 0.0, 0.45), region_map)
+    region, _ = resolve_region((0.4, 0.0, 0.45), region_map)
 
     assert region == 'cupboard_lower'
 
@@ -41,15 +40,15 @@ def test_groceries_boundary_beats_table() -> None:
     assert region == 'groceries_boundary'
 
 
-def test_fallback_used_only_when_primary_absent() -> None:
-    fallback_only = {'cupboard_fallback': _bounds(0.4, -0.2, 0.0, 0.9, 0.2, 1.2)}
+def test_box_fallback_used_only_when_primary_absent() -> None:
+    fallback_only = {'box_inside_fallback': _bounds(-0.2, -0.2, 0.0, 0.2, 0.2, 0.25)}
     with_primary = {
         **fallback_only,
-        'cupboard_lower': _bounds(0.45, -0.15, 0.35, 0.85, 0.15, 0.38),
+        'box_lid_top': _bounds(-0.2, -0.2, 0.30, 0.2, 0.2, 0.32),
     }
 
-    assert resolve_region((0.6, 0.0, 0.45), fallback_only)[0] == 'cupboard_fallback'
-    assert resolve_region((0.6, 0.0, 0.45), with_primary)[0] == 'cupboard_lower'
+    assert resolve_region((0.0, 0.0, 0.20), fallback_only)[0] == 'box_inside_fallback'
+    assert resolve_region((0.0, 0.0, 0.34), with_primary)[0] == 'box_lid_top'
 
 
 def test_resolve_object_regions_returns_maps() -> None:

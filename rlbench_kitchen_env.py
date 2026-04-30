@@ -124,8 +124,6 @@ class RLBenchKitchenEnv:
             self.regions['table'] = self.table
         if self.box is not None:
             self.regions[BOX_INSIDE_FALLBACK_REGION] = self.box
-        if self.cupboard is not None:
-            self.regions['cupboard_fallback'] = self.cupboard
         if self.groceries_boundary is not None:
             self.regions['groceries_boundary'] = self.groceries_boundary
         if self.placement_boundary is not None:
@@ -169,8 +167,6 @@ class RLBenchKitchenEnv:
         _register(BOX_INSIDE_FALLBACK_REGION, self.box)
         _register('cupboard_lower', self.cupboard_boundary)
         _register('cupboard_upper', self.cupboard_boundary_top)
-        _register('cupboard_fallback', self.cupboard)
-
         # Mug aliases
         _register('mug1', self.mug_table)
         _register('mug2', self.mug_box)
@@ -484,9 +480,7 @@ class RLBenchKitchenEnv:
             sample_y = np.random.uniform(w_min_y + padding, w_max_y - padding)
 
             # Adjust Z based on region
-            if region_name == 'cupboard_fallback':
-                sample_z = w_min_z + 0.01
-            elif region_name == 'placement_boundary':
+            if region_name == 'placement_boundary':
                 # For placement boundary, we want to be on the table surface.
                 # Check table height
                 table = self.regions.get('table')

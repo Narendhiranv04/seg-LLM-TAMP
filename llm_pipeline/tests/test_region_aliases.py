@@ -7,7 +7,7 @@ def test_kitchen_region_aliases_normalize_to_public_symbols() -> None:
     assert normalize_region_name("box-inside") == "box_inside_fallback"
     assert normalize_region_name("cupboard_boundary") == "cupboard_lower"
     assert normalize_region_name("cupboard_boundary_top") == "cupboard_upper"
-    assert normalize_region_name("shelf-lower") == "cupboard_fallback"
+    assert normalize_region_name("shelf-lower") == "cupboard_lower"
 
 
 def test_normalize_region_names_deduplicates_aliases() -> None:

@@ -136,13 +136,11 @@ def test_fallback_regions_are_hidden_from_llm_prompt() -> None:
         'cupboard_lower',
         'box_storage',
         'box_inside_fallback',
-        'cupboard_fallback',
     ]
-    snapshot.visible_regions = ['box_storage', 'box_inside_fallback', 'cupboard_fallback']
+    snapshot.visible_regions = ['box_storage', 'box_inside_fallback']
     snapshot.object_evidence['mug2'].mask_regions = [
         'box_storage',
         'box_inside_fallback',
-        'cupboard_fallback',
     ]
     snapshot.object_region_map = {'mug2': 'box_storage'}
 
@@ -155,4 +153,3 @@ def test_fallback_regions_are_hidden_from_llm_prompt() -> None:
     assert 'box_storage' in bundle.user_prompt
     assert 'cupboard_lower' in bundle.user_prompt
     assert 'box_inside_fallback' not in bundle.user_prompt
-    assert 'cupboard_fallback' not in bundle.user_prompt
