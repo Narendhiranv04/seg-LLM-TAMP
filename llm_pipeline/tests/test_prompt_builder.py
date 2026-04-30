@@ -97,6 +97,9 @@ def test_prompt_bundle_stays_text_only() -> None:
     assert 'SHARED FEW-SHOT EXEMPLAR' in system_prompt
     assert 'pick(mug2)' not in system_prompt
     assert 'CURRENT SEGMENTATION SNAPSHOT:' in user_prompt
+    assert 'REGION MEANINGS:' in user_prompt
+    assert 'placement_boundary: specific destination area on the table' in user_prompt
+    assert 'box_storage: inside-box storage target' in user_prompt
     assert 'VISIBLE OBJECT EVIDENCE:' in user_prompt
     assert 'COMPACT SEGMENTATION SUMMARY:' in user_prompt
     assert 'PREVIOUS ACTIONS (already executed, do not repeat):' in user_prompt

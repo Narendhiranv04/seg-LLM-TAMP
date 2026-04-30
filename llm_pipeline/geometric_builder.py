@@ -8,7 +8,7 @@ from llm_pipeline.pipeline_types import (
     BaseContextBuilder, SceneState, PromptBundle, FailureEvent, ICLMode
 )
 from llm_pipeline.geometric_utils import resolve_region
-from llm_pipeline.region_aliases import PLANNER_HIDDEN_REGIONS, normalize_region_name
+from llm_pipeline.region_aliases import PLANNER_HIDDEN_REGIONS, normalize_region_name, region_semantics
 
 
 class GeometricContextBuilder(BaseContextBuilder):
@@ -100,6 +100,11 @@ class GeometricContextBuilder(BaseContextBuilder):
         if valid_regions:
             obs_lines.append("\n## Valid Target Regions:")
             obs_lines.append(", ".join(valid_regions))
+            obs_lines.append("\n## Region Meanings:")
+            for region in valid_regions:
+                meaning = region_semantics(region)
+                if meaning:
+                    obs_lines.append(f"- {region}: {meaning}")
         
         obs_lines.append("\n## Object States (Geometric):")
         for obj_name in state.visible_objects:

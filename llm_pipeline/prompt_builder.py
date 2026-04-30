@@ -14,7 +14,7 @@ from llm_pipeline.pipeline_types import (
     SegmentationSnapshot,
     TextPromptBundle,
 )
-from llm_pipeline.region_aliases import PLANNER_HIDDEN_REGIONS, normalize_region_name
+from llm_pipeline.region_aliases import PLANNER_HIDDEN_REGIONS, normalize_region_name, region_semantics
 
 
 PROMPTS_DIR = Path(__file__).resolve().parent / 'prompts'
@@ -160,6 +160,12 @@ class TextOnlyContextBuilder(BaseContextBuilder):
         lines.append('- newly_visible_objects: ' + (', '.join(snapshot.newly_visible_objects) if snapshot is not None and snapshot.newly_visible_objects else '(none)'))
         lines.append(f'- visible_regions: {", ".join(visible_regions) if visible_regions else "(none)"}')
         lines.append(f'- supported_regions: {", ".join(supported_regions) if supported_regions else "(none)"}')
+        if supported_regions:
+            lines.extend(['', 'REGION MEANINGS:'])
+            for region in supported_regions:
+                meaning = region_semantics(region)
+                if meaning:
+                    lines.append(f'- {region}: {meaning}')
         if snapshot is not None:
             gripper_visible = bool(snapshot.gripper_evidence.get('visible'))
             lines.append(f'- gripper_mask_visible: {str(gripper_visible).lower()}')

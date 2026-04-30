@@ -41,10 +41,26 @@ CANONICAL_REGION_SCENE_OBJECTS = {
     "cupboard_upper": "cupboard_boundary_top",
 }
 
+REGION_SEMANTICS = {
+    "table": "broad table surface; use only when no specific table subregion applies",
+    "placement_boundary": "specific destination area on the table for placing completed objects",
+    "cupboard_lower": "lower shelf inside the cupboard",
+    "cupboard_upper": "upper shelf inside the cupboard",
+    "box_storage": "inside-box storage target for putting objects into the box",
+    "groceries_boundary": "groceries/source area on the table",
+    "box_lid_top": "support surface on top of the box lid for objects resting on the lid",
+    "box_inside_fallback": "internal broad box evidence; not a planner target",
+}
+
 
 def normalize_region_name(region_name: str | None) -> str:
     token = str(region_name or "").strip()
     return KITCHEN_REGION_ALIASES.get(token, token)
+
+
+def region_semantics(region_name: str | None) -> str:
+    canonical = normalize_region_name(region_name)
+    return REGION_SEMANTICS.get(canonical, "")
 
 
 def normalize_region_names(region_names: Iterable[str]) -> list[str]:
