@@ -15,6 +15,15 @@ ENV = RLBenchKitchenEnv(headless=headless_mode)
 
 # ----- python functions used by streams -----
 
+def _stable_pose_override_keys(obj_name, region_name):
+    return [
+        (obj_name, region_name),
+        (obj_name, None),
+        (None, region_name),
+        obj_name,
+    ]
+
+
 def _iter_forced_stable_poses(obj_name, region_name):
     """
     Yield forced stable poses injected by orchestrators.
@@ -29,15 +38,8 @@ def _iter_forced_stable_poses(obj_name, region_name):
     if not isinstance(overrides, dict):
         return []
 
-    keys = [
-        (obj_name, region_name),
-        (obj_name, None),
-        (None, region_name),
-        obj_name,
-    ]
-
     forced = []
-    for key in keys:
+    for key in _stable_pose_override_keys(obj_name, region_name):
         if key not in overrides:
             continue
         value = overrides[key]
@@ -67,13 +69,32 @@ def _iter_forced_stable_poses(obj_name, region_name):
         deduped.append(pose)
     return deduped
 
+
+def _has_exclusive_stable_pose_override(obj_name, region_name):
+    """
+    Return True when an orchestrator wants forced stable poses to replace,
+    not just precede, random stable-pose sampling for this object/region.
+    """
+    exclusive = getattr(ENV, "_stable_pose_overrides_only", None)
+    if exclusive is True:
+        return True
+    if isinstance(exclusive, dict):
+        return any(bool(exclusive.get(key)) for key in _stable_pose_override_keys(obj_name, region_name))
+    if isinstance(exclusive, (set, list, tuple)):
+        return any(key in exclusive for key in _stable_pose_override_keys(obj_name, region_name))
+    return False
+
+
 def fn_sample_stable_pose(o, r):
     obj = ENV.get_object(o)
     if not obj: return
 
     # First emit any orchestrator-specified candidates (e.g., box slots).
-    for forced_pose in _iter_forced_stable_poses(o, r):
+    forced_poses = _iter_forced_stable_poses(o, r)
+    for forced_pose in forced_poses:
         yield (forced_pose,)
+    if forced_poses and _has_exclusive_stable_pose_override(o, r):
+        return
 
     # Yield multiple samples to help the planner find a reachable one
     for _ in range(50):

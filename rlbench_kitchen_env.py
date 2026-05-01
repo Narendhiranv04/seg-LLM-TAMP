@@ -1028,6 +1028,7 @@ class RLBenchKitchenEnv:
         try:
             # 1. Determine Strategy based on Region
             is_cupboard = (region_name == 'cupboard_boundary') or (region_name == 'cupboard_boundary_top')
+            is_box_region = region_name in {'box_boundary', 'box-inside'}
             is_box_boundary = (region_name == 'box_boundary')
             
             min_x, max_x, min_y, max_y, min_z, max_z = obj.get_bounding_box()
@@ -1105,9 +1106,9 @@ class RLBenchKitchenEnv:
                     q = [cj*sc - sj*cs, cj*ss + sj*cc, cj*cs - sj*sc, cj*cc + sj*ss]
                     return q
 
-                if is_box_boundary:
-                    # User request: aligned with x axis
-                    angles = [0, np.pi]
+                if is_box_region:
+                    # Box placements are tight: keep top-down, but allow wrist yaw.
+                    angles = np.linspace(0, 2*np.pi, 16)
                 else:
                     angles = np.linspace(0, 2*np.pi, 16)
 
@@ -1119,24 +1120,49 @@ class RLBenchKitchenEnv:
             for grasp_rot in grasp_quats:
                 try:
                     # A. Solve IK for Hover Pose
-                    path_configs_hover = self.robot.solve_ik_via_sampling(target_pos_hover, quaternion=grasp_rot, max_configs=1, max_time_ms=50, ignore_collisions=True)
+                    ik_time_ms = 150 if is_box_region else 50
+                    path_configs_hover = self.robot.solve_ik_via_sampling(
+                        target_pos_hover,
+                        quaternion=grasp_rot,
+                        max_configs=1,
+                        max_time_ms=ik_time_ms,
+                        ignore_collisions=True,
+                    )
                     if path_configs_hover is None or len(path_configs_hover) == 0: 
                         continue
                     q_hover = path_configs_hover[0]
                     
                     # B. Solve IK for Place Pose
-                    path_configs_place = self.robot.solve_ik_via_sampling(target_pos_place, quaternion=grasp_rot, max_configs=1, max_time_ms=50, ignore_collisions=True)
+                    path_configs_place = self.robot.solve_ik_via_sampling(
+                        target_pos_place,
+                        quaternion=grasp_rot,
+                        max_configs=1,
+                        max_time_ms=ik_time_ms,
+                        ignore_collisions=True,
+                    )
                     if path_configs_place is None or len(path_configs_place) == 0: 
                         continue
                     q_place = path_configs_place[0]
                     
                     # C. Plan Hover -> Place (Linear)
-                    path_down = self._get_linear_path(q_hover, target_pos_place, grasp_rot, steps=50)
+                    path_down = self._get_linear_path(
+                        q_hover,
+                        target_pos_place,
+                        grasp_rot,
+                        steps=50,
+                        ignore_collisions=is_box_region,
+                    )
                     if not path_down: 
                         continue
                     
                     # D. Plan Place -> Hover (Linear Return)
-                    path_up = self._get_linear_path(q_place, target_pos_hover, grasp_rot, steps=50)
+                    path_up = self._get_linear_path(
+                        q_place,
+                        target_pos_hover,
+                        grasp_rot,
+                        steps=50,
+                        ignore_collisions=is_box_region,
+                    )
                     if not path_up:
                         path_down.remove()
                         continue
