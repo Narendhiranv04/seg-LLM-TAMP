@@ -5,6 +5,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
 
 from pddlstream.language.generator import from_gen_fn
 from pddlstream.utils import INF
+from llm_pipeline.region_aliases import (
+    BOX_INSIDE_FALLBACK_REGION,
+    BOX_STORAGE_REGION,
+    normalize_region_name,
+)
 from rlbench_kitchen_env_constrained import RLBenchKitchenEnvConstrained as RLBenchKitchenEnv
 
 # One global env instance for planning
@@ -14,6 +19,30 @@ headless_mode = os.environ.get("HEADLESS", "True") == "True"
 ENV = RLBenchKitchenEnv(headless=headless_mode)
 
 # ----- python functions used by streams -----
+
+def _stable_pose_override_keys(obj_name, region_name):
+    region_names = [region_name]
+    canonical_region = normalize_region_name(region_name)
+    if canonical_region not in region_names:
+        region_names.append(canonical_region)
+    if canonical_region == BOX_STORAGE_REGION:
+        region_names.append("box_boundary")
+    elif canonical_region == BOX_INSIDE_FALLBACK_REGION:
+        region_names.append("box-inside")
+
+    keys = []
+    for candidate_region in region_names:
+        keys.extend([
+            (obj_name, candidate_region),
+            (None, candidate_region),
+        ])
+    keys.extend([
+        (obj_name, region_name),
+        (obj_name, None),
+        obj_name,
+    ])
+    return list(dict.fromkeys(keys))
+
 
 def _iter_forced_stable_poses(obj_name, region_name):
     """
@@ -29,15 +58,8 @@ def _iter_forced_stable_poses(obj_name, region_name):
     if not isinstance(overrides, dict):
         return []
 
-    keys = [
-        (obj_name, region_name),
-        (obj_name, None),
-        (None, region_name),
-        obj_name,
-    ]
-
     forced = []
-    for key in keys:
+    for key in _stable_pose_override_keys(obj_name, region_name):
         if key not in overrides:
             continue
         value = overrides[key]
@@ -67,13 +89,32 @@ def _iter_forced_stable_poses(obj_name, region_name):
         deduped.append(pose)
     return deduped
 
+
+def _has_exclusive_stable_pose_override(obj_name, region_name):
+    """
+    Return True when an orchestrator wants forced stable poses to replace,
+    not just precede, random stable-pose sampling for this object/region.
+    """
+    exclusive = getattr(ENV, "_stable_pose_overrides_only", None)
+    if exclusive is True:
+        return True
+    if isinstance(exclusive, dict):
+        return any(bool(exclusive.get(key)) for key in _stable_pose_override_keys(obj_name, region_name))
+    if isinstance(exclusive, (set, list, tuple)):
+        return any(key in exclusive for key in _stable_pose_override_keys(obj_name, region_name))
+    return False
+
+
 def fn_sample_stable_pose(o, r):
     obj = ENV.get_object(o)
     if not obj: return
 
     # First emit any orchestrator-specified candidates (e.g., box slots).
-    for forced_pose in _iter_forced_stable_poses(o, r):
+    forced_poses = _iter_forced_stable_poses(o, r)
+    for forced_pose in forced_poses:
         yield (forced_pose,)
+    if forced_poses and _has_exclusive_stable_pose_override(o, r):
+        return
 
     # Yield multiple samples to help the planner find a reachable one
     for _ in range(50):

@@ -1,9 +1,61 @@
 import os
 
+from llm_pipeline.region_aliases import (
+    BOX_INSIDE_FALLBACK_REGION,
+    BOX_STORAGE_REGION,
+    normalize_region_name,
+)
 from rlbench_kitchen_env import RLBenchKitchenEnv
 import numpy as np
 
 class RLBenchKitchenEnvConstrained(RLBenchKitchenEnv):
+    def compute_place_trajectory(self, obj, pose, region_name=None):
+        """
+        Plan box insertions with the box collision geometry ghosted.
+
+        The slot candidates already keep mugs separated; this avoids rejecting
+        good box slots because the gripper path brushes the boundary/walls in
+        collision checking.
+        """
+        canonical_region = normalize_region_name(region_name)
+        is_box_place = canonical_region in {BOX_STORAGE_REGION, BOX_INSIDE_FALLBACK_REGION}
+        if not is_box_place:
+            return super().compute_place_trajectory(obj, pose, region_name=region_name)
+
+        collidables = []
+        seen = set()
+
+        def add_collidable(shape):
+            if shape is None:
+                return
+            try:
+                key = shape.get_handle()
+            except Exception:
+                key = id(shape)
+            if key in seen:
+                return
+            seen.add(key)
+            try:
+                collidables.append((shape, shape.is_collidable()))
+                shape.set_collidable(False)
+            except Exception:
+                pass
+
+        for attr_name in ("box_boundary", "box"):
+            add_collidable(getattr(self, attr_name, None))
+        add_collidable(self.get_object("box_base"))
+
+        try:
+            print(f"DEBUG [Constrained]: Ghost Mode Activated for Box during Place Planning ({region_name})")
+            return super().compute_place_trajectory(obj, pose, region_name=region_name)
+        finally:
+            for shape, state in collidables:
+                try:
+                    shape.set_collidable(state)
+                except Exception:
+                    pass
+            print("DEBUG [Constrained]: Ghost Mode Deactivated for Box Place Planning")
+
     def compute_pick_trajectory(self, obj, pose):
         """
         Override to disable box collision when picking the mug inside it.

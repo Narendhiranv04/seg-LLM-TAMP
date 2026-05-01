@@ -290,24 +290,21 @@ def _compute_box_slot_poses(env, mug_names):
 
     span_x = max_x - min_x
     span_y = max_y - min_y
-    margin = 0.045
+    length_is_x = span_x >= span_y
+    width_is_x = not length_is_x
+    width_span = span_x if width_is_x else span_y
+    width_margin = 0.035
+    if width_span < (2.0 * width_margin):
+        width_margin = max(0.01, 0.18 * width_span)
 
-    # Keep bounds valid even for tighter boxes.
-    if span_x < (2.0 * margin):
-        margin_x = max(0.01, 0.2 * span_x)
+    center_x = 0.5 * (min_x + max_x)
+    center_y = 0.5 * (min_y + max_y)
+    if width_is_x:
+        xs = np.linspace(min_x + width_margin, max_x - width_margin, count)
+        ys = np.full(count, center_y, dtype=float)
     else:
-        margin_x = margin
-    if span_y < (2.0 * margin):
-        margin_y = max(0.01, 0.2 * span_y)
-    else:
-        margin_y = margin
-
-    if span_x >= span_y:
-        xs = np.linspace(min_x + margin_x, max_x - margin_x, count)
-        ys = np.full(count, 0.5 * (min_y + max_y), dtype=float)
-    else:
-        ys = np.linspace(min_y + margin_y, max_y - margin_y, count)
-        xs = np.full(count, 0.5 * (min_x + max_x), dtype=float)
+        ys = np.linspace(min_y + width_margin, max_y - width_margin, count)
+        xs = np.full(count, center_x, dtype=float)
 
     quat_ref_obj = env.get_object("mug2")
     if quat_ref_obj is None and mug_names:
@@ -345,8 +342,8 @@ def _clip(value, lo, hi):
 
 def _box_slot_candidates(env, slot_pose):
     """
-    Build a few nearby stable-pose candidates around the nominal slot.
-    This reduces planner failures in tight boxes without teleporting.
+    Build guided stable-pose candidates for a mug in the box.
+    Candidates stay centered on box length and vary only along box width.
     """
     if slot_pose is None or len(slot_pose) < 7:
         return []
@@ -367,22 +364,26 @@ def _box_slot_candidates(env, slot_pose):
     if lo_y > hi_y:
         lo_y = hi_y = 0.5 * (min_y + max_y)
 
+    length_is_x = span_x >= span_y
+    width_is_x = not length_is_x
+    center_x = _clip(0.5 * (min_x + max_x), lo_x, hi_x)
+    center_y = _clip(0.5 * (min_y + max_y), lo_y, hi_y)
     x0 = _clip(float(slot_pose[0]), lo_x, hi_x)
     y0 = _clip(float(slot_pose[1]), lo_y, hi_y)
     z0 = float(slot_pose[2])
     quat = [float(slot_pose[3]), float(slot_pose[4]), float(slot_pose[5]), float(slot_pose[6])]
 
-    primary_x = span_x >= span_y
-    delta = max(0.012, 0.14 * min(max(span_x, 1e-3), max(span_y, 1e-3)))
+    width_span = min(max(span_x, 1e-3), max(span_y, 1e-3))
+    delta = max(0.012, 0.14 * width_span)
     offsets = [0.0, +delta, -delta, +2.0 * delta, -2.0 * delta]
 
     cands = []
     for off in offsets:
-        if primary_x:
+        if width_is_x:
             x = _clip(x0 + off, lo_x, hi_x)
-            y = y0
+            y = center_y
         else:
-            x = x0
+            x = center_x
             y = _clip(y0 + off, lo_y, hi_y)
         cands.append((round(x, 5), round(y, 5), round(z0, 5), *[round(q, 6) for q in quat]))
 
@@ -402,26 +403,48 @@ def _install_box_slot_overrides(env, mug_name, slot_pose):
     Returns previous override map so callers can restore it.
     """
     prev = getattr(env, "_stable_pose_overrides", None)
+    prev_only = getattr(env, "_stable_pose_overrides_only", None)
     candidates = _box_slot_candidates(env, slot_pose)
     if not candidates:
-        return prev
+        return prev, prev_only
 
     override_map = dict(prev) if isinstance(prev, dict) else {}
     override_map[(mug_name, "box_boundary")] = candidates
     override_map[(mug_name, "box-inside")] = candidates
     override_map[mug_name] = candidates
     env._stable_pose_overrides = override_map
+
+    exclusive_keys = [(mug_name, "box_boundary"), (mug_name, "box-inside")]
+    if prev_only is True:
+        env._stable_pose_overrides_only = True
+    elif isinstance(prev_only, dict):
+        exclusive = dict(prev_only)
+        for key in exclusive_keys:
+            exclusive[key] = True
+        env._stable_pose_overrides_only = exclusive
+    else:
+        exclusive = set(prev_only) if isinstance(prev_only, (set, list, tuple)) else set()
+        exclusive.update(exclusive_keys)
+        env._stable_pose_overrides_only = exclusive
+
     xyz = [round(v, 4) for v in candidates[0][:3]]
     print(f"[SlotGuide] {mug_name}: using guided box slot candidates (first={xyz})")
-    return prev
+    return prev, prev_only
 
 
-def _restore_overrides(env, prev):
+def _restore_overrides(env, prev_state):
+    prev, prev_only = prev_state if isinstance(prev_state, tuple) and len(prev_state) == 2 else (prev_state, None)
     if prev is None:
         if hasattr(env, "_stable_pose_overrides"):
             delattr(env, "_stable_pose_overrides")
     else:
         env._stable_pose_overrides = prev
+
+    if prev_only is None:
+        if hasattr(env, "_stable_pose_overrides_only"):
+            delattr(env, "_stable_pose_overrides_only")
+    else:
+        env._stable_pose_overrides_only = prev_only
 
 
 def _snap_mug_to_pose(env, pr, mug_name, pose7):

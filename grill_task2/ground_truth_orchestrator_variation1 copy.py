@@ -3529,6 +3529,72 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         step(self.pr, 10)
         return True
 
+    def _lift_after_plate_pick(self):
+        if not self.is_plate:
+            return True
+        try:
+            q_current = list(self.env.get_robot_conf())
+            tip = self.env.robot.get_tip()
+            tip_pos = list(tip.get_position())
+            tip_quat = list(tip.get_quaternion())
+        except Exception:
+            print("[plate-pick] WARNING: could not read tip pose for high retreat.")
+            return False
+
+        min_z = float(os.environ.get("GRILL_PLATE_PICK_RETREAT_MIN_Z", "1.22"))
+        z_lift = float(os.environ.get("GRILL_PLATE_PICK_RETREAT_Z_LIFT", "0.14"))
+        target_pos = [float(tip_pos[0]), float(tip_pos[1]), max(float(tip_pos[2]) + z_lift, min_z)]
+        if target_pos[2] <= float(tip_pos[2]) + 0.01:
+            return True
+
+        steps = int(os.environ.get("GRILL_PLATE_PICK_RETREAT_STEPS", "55"))
+        try:
+            path = self.env._get_linear_path(
+                q_current,
+                target_pos,
+                tip_quat,
+                ignore_collisions=True,
+                steps=max(20, steps),
+            )
+        except Exception:
+            path = None
+
+        if path:
+            traj = path._path_points.reshape(-1, 7).tolist()
+            print(
+                "[plate-pick] High retreat before home: "
+                f"tip_z {float(tip_pos[2]):.3f} -> {target_pos[2]:.3f}"
+            )
+            execute_trajectory(self.env, self.pr, traj, steps_per_segment=4)
+            step(self.pr, 4)
+            return True
+
+        try:
+            configs = self.env.robot.solve_ik_via_sampling(
+                target_pos,
+                quaternion=tip_quat,
+                max_configs=8,
+                max_time_ms=160,
+                ignore_collisions=True,
+            )
+        except Exception:
+            configs = None
+        if configs:
+            q_target = min(
+                configs,
+                key=lambda q: float(np.linalg.norm(np.array(q, dtype=float) - np.array(q_current, dtype=float))),
+            )
+            print(
+                "[plate-pick] High retreat before home via IK: "
+                f"tip_z {float(tip_pos[2]):.3f} -> {target_pos[2]:.3f}"
+            )
+            _move_to_conf_fast(self.env, self.pr, q_target, label="plate-pick->high_retreat", steps=70)
+            step(self.pr, 4)
+            return True
+
+        print("[plate-pick] WARNING: high retreat failed; continuing to home from normal retreat.")
+        return False
+
     def _move_to_pick(self):
         if not self._at_home():
             self._move_back_home("pre-pick->home")
@@ -3570,6 +3636,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             return False, f"failed to attach '{self.obj_name}' to gripper"
         execute_trajectory(self.env, self.pr, retreat_traj, steps_per_segment=8)
         step(self.pr, 8)
+        self._lift_after_plate_pick()
         self._move_back_home("pick->home")
         return True, "pick"
 
@@ -4617,15 +4684,24 @@ def main():
     in_grill, on_plate, outside = _classify_meats(env, meats)
     print(f"\nInitial classification: in_grill={len(in_grill)}, on_plate={len(on_plate)}, outside={len(outside)}")
 
-    remove_inside_target = _pick_preferred_item(
-        in_grill,
-        preferred_labels=variant_prefs["remove_inside_priority"],
-    )
-    plate_inside_target = _pick_preferred_item(
-        in_grill,
-        preferred_labels=variant_prefs["plate_inside_priority"],
-        exclude=[remove_inside_target] if remove_inside_target is not None else (),
-    )
+    if variant_id == "G2":
+        # G2 keeps the initial inside-grill meat for Task 3 instead of
+        # removing it to the table first.
+        remove_inside_target = None
+        plate_inside_target = _pick_preferred_item(
+            in_grill,
+            preferred_labels=variant_prefs["plate_inside_priority"],
+        )
+    else:
+        remove_inside_target = _pick_preferred_item(
+            in_grill,
+            preferred_labels=variant_prefs["remove_inside_priority"],
+        )
+        plate_inside_target = _pick_preferred_item(
+            in_grill,
+            preferred_labels=variant_prefs["plate_inside_priority"],
+            exclude=[remove_inside_target] if remove_inside_target is not None else (),
+        )
     outside_targets = _order_items_by_preference(
         outside,
         preferred_labels=variant_prefs["outside_to_grill_priority"],
