@@ -23,8 +23,11 @@ VLM_outputs/
 ablation_results/
 baseline_plans/
 baseline_with_rules_plans/
+data/
+data_states/
 demo_logs/
 evaluation_results/
+grill_task2/data_states/
 llm_pipeline/results/
 experiments/results/
 experiments/statistics/
@@ -49,6 +52,51 @@ variation_*/segmentation_videos_live_seg/
 # Local screenshots and accidental files
 Screenshot_*.png
 =*
+
+# Local workspace notes, generated reports, and paper scratch files
+2510.25548v1.pdf
+AGENTS.md
+COAST-PDDL/
+Failure_checks_list.txt
+GROUND_TRUTH_SETUP.md
+GT_TRICKS_REPORT.md
+PIPELINE_REPORT.md
+Status Doc/live_scene_state_reports/
+Status Doc/scene_state_reports/
+VLM_replan_mock_action_sequence.txt
+constraints_and_helpers.txt
+detailed_GT/
+experiments/EXPERIMENT_LOG.md
+grill_task2/ground_truth_plan.txt
+ground_truth_plan.txt
+ground_truth_sequence_grill.md
+ground_truth_sequences.md
+ground_truth_variants_reference.txt
+llm_pipeline/REMOTE_LLM_SETUP.md
+llm_pipeline/architectural_handover.md
+llm_pipeline/changes-explanation.md
+llm_pipeline/changes.txt
+llm_pipeline/graphify-out/
+methodology_section_paper.txt
+orchestrator copy.py
+region_handling_comparison.md
+results_section_paper.txt
+test_vlm_output.txt
+tools/
+variation_1_easy/README.md
+variation_1_easy/ground_truth_plan.txt
+variation_2/README.md
+variation_2/ground_truth_plan.txt
+variation_3_hard/README.md
+variation_3_hard/ground_truth_plan.txt
+vlm_pipeline/ALL_SCRIPTS.txt
+vlm_pipeline/MOCK_REPLAN_SEQUENCE.txt
+vlm_pipeline/README.md
+vlm_pipeline/REMOTE_VLM_SETUP.md
+vlm_pipeline/example1_vlm_full
+vlm_pipeline/example2_vlm_full
+vlm_pipeline/example3_vlm_replanning.txt
+graphify-out/
 
 # Build artifacts inside vendored planners/dependencies
 pddlstream/downward/builds/
