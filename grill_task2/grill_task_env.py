@@ -50,8 +50,10 @@ class GrillTaskEnv:
     def __init__(self, headless=True):
         self.pr = PyRep()
         self.pr.launch(SCENE_FILE, headless=headless)
-        # Optional mode: preserve the exact lid pose authored in the scene.
-        self._preserve_scene_lid_pose = os.environ.get("GRILL_PRESERVE_SCENE_LID_POSE", "False") == "True"
+        # Trust the curated scene's authored lid pose by default. Set
+        # GRILL_PRESERVE_SCENE_LID_POSE=False only when deliberately forcing a
+        # legacy numeric closed angle through GRILL_LID_CLOSED_ANGLE.
+        self._preserve_scene_lid_pose = os.environ.get("GRILL_PRESERVE_SCENE_LID_POSE", "True") == "True"
         self._closed_lid_angle = float(os.environ.get("GRILL_LID_CLOSED_ANGLE", "0.0"))
         self._lid_collision_backup = None
         if self._preserve_scene_lid_pose:
@@ -528,6 +530,12 @@ class GrillTaskEnv:
                 except Exception:
                     pass
             self.pr.step()
+        if self.lid_joint is not None and self._preserve_scene_lid_pose:
+            try:
+                self._closed_lid_angle = float(self.lid_joint.get_joint_position())
+                os.environ["GRILL_LID_CLOSED_ANGLE"] = f"{self._closed_lid_angle:.6f}"
+            except Exception:
+                pass
         if self.lid_joint is not None and (not self._preserve_scene_lid_pose):
             self.set_lid_collision_enabled(True)
 

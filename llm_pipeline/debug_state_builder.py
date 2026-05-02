@@ -65,6 +65,42 @@ def _load_env(task_family: str, scene_path: str, headless: bool):
     raise ValueError(f"Unsupported task family: {task_family}")
 
 
+def _lid_joint_debug_info(env) -> dict[str, Any]:
+    lid_joint = getattr(env, "lid_joint", None)
+    current_angle = None
+    if lid_joint is not None:
+        try:
+            current_angle = float(lid_joint.get_joint_position())
+        except Exception:
+            current_angle = None
+
+    closed_angle = getattr(env, "_closed_lid_angle", None)
+    try:
+        closed_angle = None if closed_angle is None else float(closed_angle)
+    except Exception:
+        closed_angle = None
+
+    initial_angle = getattr(env, "_initial_lid_angle", None)
+    try:
+        initial_angle = None if initial_angle is None else float(initial_angle)
+    except Exception:
+        initial_angle = None
+
+    delta_from_closed = None
+    if current_angle is not None and closed_angle is not None:
+        delta_from_closed = current_angle - closed_angle
+
+    return {
+        "current_angle": current_angle,
+        "closed_reference_angle": closed_angle,
+        "initial_angle_after_env_load": initial_angle,
+        "delta_from_closed_reference": delta_from_closed,
+        "preserve_scene_lid_pose": bool(getattr(env, "_preserve_scene_lid_pose", False)),
+        "env_GRILL_LID_CLOSED_ANGLE": os.environ.get("GRILL_LID_CLOSED_ANGLE"),
+        "env_GRILL_PRESERVE_SCENE_LID_POSE": os.environ.get("GRILL_PRESERVE_SCENE_LID_POSE"),
+    }
+
+
 def _state_summary(state) -> dict[str, Any]:
     snapshot = getattr(state, "_original_snapshot", None)
     object_evidence = {}
@@ -124,6 +160,7 @@ def _format_scene_report(
     visible_regions = snapshot.get("visible_regions", [])
     object_region_map = summary.get("object_region_map", {})
     object_region_descriptions = summary.get("object_region_descriptions", {})
+    lid_joint = summary.get("lid_joint", {})
 
     if not visible_objects:
         result = "FAIL"
@@ -157,6 +194,11 @@ def _format_scene_report(
         f"- Supported regions: {_format_list(snapshot.get('supported_regions', []))}",
         f"- Pose map objects: {_format_list(summary['pose_map_keys'])}",
         f"- Gripper: {summary['gripper_state'].get('status', 'unknown')}",
+        f"- Lid joint current angle: {lid_joint.get('current_angle')}",
+        f"- Lid joint closed reference: {lid_joint.get('closed_reference_angle')}",
+        f"- Lid joint initial angle after env load: {lid_joint.get('initial_angle_after_env_load')}",
+        f"- Lid joint delta from closed reference: {lid_joint.get('delta_from_closed_reference')}",
+        f"- Preserve scene lid pose: {lid_joint.get('preserve_scene_lid_pose')}",
         "",
         "## Semantic Facts",
         "",
@@ -312,6 +354,7 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
         print("[Debug] Calling LLMOnlyReplanningPipeline._build_scene_state()...")
         state = pipeline._build_scene_state()
         summary = _state_summary(state)
+        summary["lid_joint"] = _lid_joint_debug_info(env)
 
         snapshot = summary["snapshot"] or {}
 

@@ -68,6 +68,7 @@ os.environ["GRILL_SCENE_FILE"] = SCENE_PATH
 os.environ.setdefault("HEADLESS", "False")
 # Set robust lid defaults before ENV is imported/constructed.
 os.environ.setdefault("GRILL_LID_TRAVEL_ANGLE", f"{math.radians(95.0):.6f}")
+os.environ.setdefault("GRILL_PRESERVE_SCENE_LID_POSE", "True")
 os.environ.setdefault("GRILL_LID_CLOSED_ANGLE", "0.0")
 os.environ.setdefault("GRILL_LID_OPEN_ANGLE", f"{math.radians(95.0):.6f}")
 os.environ.setdefault("GRILL_LID_AUTOCALIBRATE", "False")
