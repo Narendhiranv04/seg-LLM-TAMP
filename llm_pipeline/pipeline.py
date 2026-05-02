@@ -588,12 +588,17 @@ class LLMOnlyReplanningPipeline:
     def _settle_environment(self) -> None:
         if self.env is None or not hasattr(self.env, 'pr'):
             return
+        hold_startup_lid_pose = getattr(self.env, 'hold_startup_lid_pose', None)
         for _ in range(50):
+            if callable(hold_startup_lid_pose):
+                hold_startup_lid_pose()
             self.env.pr.step()
         if hasattr(self.env, 'get_home_conf') and hasattr(self.env, 'set_robot_conf'):
             try:
                 self.env.set_robot_conf(self.env.get_home_conf())
                 for _ in range(10):
+                    if callable(hold_startup_lid_pose):
+                        hold_startup_lid_pose()
                     self.env.pr.step()
             except Exception:
                 pass

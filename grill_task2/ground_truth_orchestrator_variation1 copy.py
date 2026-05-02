@@ -86,6 +86,10 @@ LID_CLOSED_ANGLE = float(os.environ.get("GRILL_LID_CLOSED_ANGLE", "0.0"))
 LID_OPEN_ANGLE = float(os.environ.get("GRILL_LID_OPEN_ANGLE", str(LID_CLOSED_ANGLE + LID_TRAVEL_ANGLE)))
 MIN_OPEN_TRAVEL_RAD = float(os.environ.get("GRILL_MIN_OPEN_TRAVEL_RAD", f"{math.radians(95.0):.6f}"))
 FORCE_MIN_OPEN_TRAVEL = os.environ.get("GRILL_FORCE_MIN_OPEN_TRAVEL", "False") == "True"
+LID_EXTRA_OPEN_RAD = float(os.environ.get(
+    "GRILL_LID_EXTRA_OPEN_RAD",
+    f"{math.radians(float(os.environ.get('GRILL_LID_EXTRA_OPEN_DEG', '15.0'))):.6f}",
+))
 LID_ANGLE_TOL = float(os.environ.get("GRILL_LID_ANGLE_TOL", "0.06"))
 LID_AUTOCALIBRATE = os.environ.get("GRILL_LID_AUTOCALIBRATE", "False") == "True"
 HANDLE_PROBE_AT_STARTUP = os.environ.get("GRILL_HANDLE_PROBE_AT_STARTUP", "False") == "True"
@@ -2454,6 +2458,52 @@ def _get_lid_joint_angle(env):
         return None
 
 
+def _lid_joint_interval_bounds(env):
+    h = _resolve_lid_joint_handle(env)
+    if h is None:
+        return None
+    try:
+        cyclic, interval = sim.simGetJointInterval(int(h))
+        if cyclic or interval is None:
+            return None
+        lo = float(interval[0])
+        hi = float(interval[0] + interval[1])
+        if hi <= lo:
+            return None
+        return lo, hi
+    except Exception:
+        return None
+
+
+def _open_angle_for_closed_pose(env, closed_angle):
+    """Choose the open target just past the authored open endpoint."""
+    closed = float(closed_angle)
+    bounds = _lid_joint_interval_bounds(env)
+    if bounds is None:
+        return float(closed + abs(float(LID_TRAVEL_ANGLE)))
+
+    lo, hi = bounds
+    tol = 1e-3
+    if abs(closed - hi) <= abs(closed - lo) + tol:
+        return float(lo - abs(float(LID_EXTRA_OPEN_RAD)))
+    return float(hi + abs(float(LID_EXTRA_OPEN_RAD)))
+
+
+def _target_open_joint(current_joint):
+    nominal_target = float(LID_OPEN_ANGLE)
+    if not FORCE_MIN_OPEN_TRAVEL:
+        return nominal_target
+
+    nominal_delta = float(nominal_target - current_joint)
+    min_open = float(MIN_OPEN_TRAVEL_RAD)
+    if abs(nominal_delta) >= min_open:
+        return nominal_target
+    sign = -1.0 if nominal_delta < 0.0 else 1.0
+    if abs(nominal_delta) < 1e-3:
+        sign = -1.0 if float(LID_CLOSED_ANGLE) > current_joint else 1.0
+    return float(current_joint + sign * min_open)
+
+
 def _force_lid_closed(env, pr, steps=80):
     """Hard-hold lid at closed angle for a short period."""
     h = _resolve_lid_joint_handle(env)
@@ -2549,7 +2599,7 @@ def _calibrate_lid_from_waypoints(env, pr):
     LID_OPEN_ANGLE = float(best_open[0])
     if abs(LID_OPEN_ANGLE - LID_CLOSED_ANGLE) < 1e-4:
         # Joint angle might be decoupled from mesh; keep a nonzero travel target.
-        LID_OPEN_ANGLE = float(LID_CLOSED_ANGLE + LID_TRAVEL_ANGLE)
+        LID_OPEN_ANGLE = _open_angle_for_closed_pose(env, LID_CLOSED_ANGLE)
     _enforce_min_open_travel()
     print(
         f"[startup] Lid auto-calibration: close_wp={CLOSE_WP_NAME}, open_wp={OPEN_WP_NAME}, "
@@ -2982,7 +3032,7 @@ def _run_open_lid_motion_clean(env, pr, task_name):
     step(pr, 12)
 
     # -------------------------
-    # 3) Continuous arc to 95 deg
+    # 3) Continuous arc to the scene's open joint target
     # -------------------------
     start_handle = _sample_handle_position(handle, pr=pr, samples=2)
     if start_handle is None:
@@ -2992,18 +3042,7 @@ def _run_open_lid_motion_clean(env, pr, task_name):
     current_joint = _get_lid_joint_angle(env)
     if current_joint is None:
         current_joint = float(LID_CLOSED_ANGLE)
-    # Enforce at least 95 deg opening travel while gripper remains closed.
-    nominal_target = float(LID_OPEN_ANGLE)
-    nominal_delta = float(nominal_target - current_joint)
-    min_open = float(math.radians(95.0))
-    if abs(nominal_delta) >= min_open:
-        target_joint = nominal_target
-    else:
-        sign = -1.0 if nominal_delta < 0.0 else 1.0
-        if abs(nominal_delta) < 1e-3:
-            # Prefer opening direction away from closed angle baseline.
-            sign = -1.0 if float(LID_CLOSED_ANGLE) > current_joint else 1.0
-        target_joint = float(current_joint + sign * min_open)
+    target_joint = _target_open_joint(current_joint)
     rotation_amount = float(target_joint - current_joint)
 
     # Build continuous tip waypoints around hinge using current grasp offset.
@@ -4160,16 +4199,7 @@ class GrillLidPrimitiveExecutor(GrillPrimitiveExecutorBase):
             if self.current_joint is None:
                 self.current_joint = float(LID_CLOSED_ANGLE)
 
-            nominal_target = float(LID_OPEN_ANGLE)
-            nominal_delta = float(nominal_target - self.current_joint)
-            min_open = float(math.radians(95.0))
-            if abs(nominal_delta) >= min_open:
-                self.target_joint = nominal_target
-            else:
-                sign = -1.0 if nominal_delta < 0.0 else 1.0
-                if abs(nominal_delta) < 1e-3:
-                    sign = -1.0 if float(LID_CLOSED_ANGLE) > self.current_joint else 1.0
-                self.target_joint = float(self.current_joint + sign * min_open)
+            self.target_joint = _target_open_joint(self.current_joint)
             self.rotation_amount = float(self.target_joint - self.current_joint)
 
             r_tip = start_tip - self.hinge_np
@@ -4536,7 +4566,14 @@ def main():
     pre = _get_lid_joint_angle(env)
     d_close_pre = _handle_waypoint_distance(env, CLOSE_WP_NAME)
     d_open_pre = _handle_waypoint_distance(env, OPEN_WP_NAME)
-    if USE_INITIAL_LID_AS_CLOSED and (pre is not None):
+    preserve_scene_lid_pose = bool(getattr(env, "_preserve_scene_lid_pose", False))
+    scene_closed_angle = getattr(env, "_closed_lid_angle", None)
+    if preserve_scene_lid_pose and scene_closed_angle is not None:
+        LID_CLOSED_ANGLE = float(scene_closed_angle)
+        LID_OPEN_ANGLE = _open_angle_for_closed_pose(env, LID_CLOSED_ANGLE)
+        os.environ["GRILL_LID_CLOSED_ANGLE"] = f"{LID_CLOSED_ANGLE:.6f}"
+        os.environ["GRILL_LID_OPEN_ANGLE"] = f"{LID_OPEN_ANGLE:.6f}"
+    elif USE_INITIAL_LID_AS_CLOSED and (pre is not None):
         # If initial pose looks open-like, infer closed angle from local
         # gradient around the current joint value.
         closed_est, inferred = _estimate_closed_angle_from_current(
@@ -4547,7 +4584,7 @@ def main():
             LID_CLOSED_ANGLE = float(closed_est)
         else:
             LID_CLOSED_ANGLE = float(pre)
-            LID_OPEN_ANGLE = float(LID_CLOSED_ANGLE + abs(float(LID_TRAVEL_ANGLE)))
+            LID_OPEN_ANGLE = _open_angle_for_closed_pose(env, LID_CLOSED_ANGLE)
     _enforce_min_open_travel()
     print(f"[startup] Lid targets from scene: open={LID_OPEN_ANGLE:.3f}, closed={LID_CLOSED_ANGLE:.3f}")
     if pre is not None:
@@ -4560,8 +4597,12 @@ def main():
     try:
         env.stabilize_startup_state(steps=15)
         print(f"Lid targets: closed={LID_CLOSED_ANGLE:.3f} rad, open={LID_OPEN_ANGLE:.3f} rad")
-        _set_lid_servo_lock(env, True)
-        if KEEP_LID_COLLISION_OFF_UNTIL_OPEN:
+        if preserve_scene_lid_pose:
+            reached = True
+            final_closed = LID_CLOSED_ANGLE
+            print("[startup] Preserving scene-authored lid pose; leaving lid controller unchanged.")
+        elif KEEP_LID_COLLISION_OFF_UNTIL_OPEN:
+            _set_lid_servo_lock(env, True)
             try:
                 env.set_lid_collision_enabled(False)
             except Exception:
@@ -4569,6 +4610,7 @@ def main():
             _set_lid_joint_angle(env, pr, LID_CLOSED_ANGLE, steps=90)
             _force_lid_closed(env, pr, steps=100)
         else:
+            _set_lid_servo_lock(env, True)
             reached, final_closed = _close_lid_until_contact(
                 env, pr, LID_CLOSED_ANGLE, steps=130, backoff=0.05
             )
@@ -4603,7 +4645,7 @@ def main():
             if best is not None:
                 best_d, best_a = best
                 LID_CLOSED_ANGLE = float(best_a)
-                LID_OPEN_ANGLE = float(LID_CLOSED_ANGLE + LID_TRAVEL_ANGLE)
+                LID_OPEN_ANGLE = _open_angle_for_closed_pose(env, LID_CLOSED_ANGLE)
                 _enforce_min_open_travel()
                 print(
                     f"[startup] Fallback closed angle selected: {LID_CLOSED_ANGLE:.3f} "
@@ -4636,7 +4678,10 @@ def main():
     step(pr, 3)
     go_home(env, pr)
     # Re-enforce closed start immediately after home move.
-    if KEEP_LID_COLLISION_OFF_UNTIL_OPEN:
+    preserve_scene_lid_pose = bool(getattr(env, "_preserve_scene_lid_pose", False))
+    if preserve_scene_lid_pose:
+        print("[startup] Preserving scene-authored lid pose after home; leaving lid controller unchanged.")
+    elif KEEP_LID_COLLISION_OFF_UNTIL_OPEN:
         try:
             env.set_lid_collision_enabled(False)
         except Exception:
@@ -4654,6 +4699,7 @@ def main():
         )
         if final_home_closed is not None:
             LID_CLOSED_ANGLE = float(final_home_closed)
+            LID_OPEN_ANGLE = _open_angle_for_closed_pose(env, LID_CLOSED_ANGLE)
             _enforce_min_open_travel()
         print(
             f"[startup] post-home contact-safe close: reached={reached_home} | "

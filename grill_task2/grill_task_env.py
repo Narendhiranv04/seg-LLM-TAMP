@@ -48,6 +48,7 @@ def quaternion_from_euler(ai, aj, ak):
 
 class GrillTaskEnv:
     def __init__(self, headless=True):
+        self._lid_startup_diagnostics = []
         self.pr = PyRep()
         self.pr.launch(SCENE_FILE, headless=headless)
         # Trust the curated scene's authored lid pose by default. Set
@@ -61,6 +62,7 @@ class GrillTaskEnv:
                 pre_lid = Joint('lid_joint')
                 self._closed_lid_angle = float(pre_lid.get_joint_position())
                 os.environ["GRILL_LID_CLOSED_ANGLE"] = f"{self._closed_lid_angle:.6f}"
+                self._capture_lid_joint_diagnostics("after_scene_launch_before_start", pre_lid)
             except Exception:
                 pass
         else:
@@ -79,6 +81,7 @@ class GrillTaskEnv:
             except Exception:
                 pass
         self.pr.start()
+        self._capture_lid_joint_diagnostics("after_pr_start")
 
         # ---- Robot ----
         self.robot = Panda()
@@ -180,28 +183,24 @@ class GrillTaskEnv:
         try:
             self.lid_joint = Joint('lid_joint')
             self._initial_lid_angle = float(self.lid_joint.get_joint_position())
+            self._capture_lid_joint_diagnostics("after_lid_joint_lookup", self.lid_joint)
         except Exception:
             self.lid_joint = None
             self._initial_lid_angle = None
             print("Warning: 'lid_joint' not found, lid rotation may not work")
 
-        if self._preserve_scene_lid_pose:
-            if self.lid_joint is not None:
-                try:
-                    self._closed_lid_angle = float(self.lid_joint.get_joint_position())
-                    os.environ["GRILL_LID_CLOSED_ANGLE"] = f"{self._closed_lid_angle:.6f}"
-                except Exception:
-                    pass
-        else:
+        if not self._preserve_scene_lid_pose:
             self._closed_lid_angle = float(os.environ.get("GRILL_LID_CLOSED_ANGLE", "0.0"))
 
-        if self.lid_joint is not None:
-            # Hard-hold the lid in closed state during startup.
+        if self.lid_joint is not None and not self._preserve_scene_lid_pose:
+            # Hard-hold the lid in the requested numeric closed state only for
+            # legacy forced-angle startup.
             self.set_lid_servo_lock(True)
-            if not self._preserve_scene_lid_pose:
-                # Do not step here before objects are frozen; it can destabilize
-                # the plate/meat at startup in this scene.
-                self._set_lid_angle_hard(float(self._closed_lid_angle), hold_steps=0)
+            # Do not step here before objects are frozen; it can destabilize
+            # the plate/meat at startup in this scene.
+            self._set_lid_angle_hard(float(self._closed_lid_angle), hold_steps=0)
+        elif self.lid_joint is not None:
+            self.hold_startup_lid_pose()
 
         # Try to get the physical handle first (avoid visual-only shape).
         self.handle = _safe_shape('handle') or _safe_shape('handle_visual')
@@ -316,6 +315,56 @@ class GrillTaskEnv:
         self._register_task_objects_for_stability()
         if self.enable_startup_stabilization:
             self.stabilize_startup_state(steps=10)
+
+    def _capture_lid_joint_diagnostics(self, label, joint=None):
+        """Record lid joint controller state at startup checkpoints."""
+        j = joint
+        if j is None:
+            try:
+                j = getattr(self, "lid_joint", None) or Joint("lid_joint")
+            except Exception:
+                j = None
+        if j is None:
+            self._lid_startup_diagnostics.append({"label": str(label), "available": False})
+            return
+
+        def _read(fn):
+            try:
+                value = fn()
+                if hasattr(value, "name"):
+                    return value.name
+                if isinstance(value, np.generic):
+                    return value.item()
+                return value
+            except Exception:
+                return None
+
+        interval = _read(lambda: j.get_joint_interval())
+        if interval is not None:
+            cyclic, bounds = interval
+            interval = {
+                "cyclic": bool(cyclic),
+                "min": float(bounds[0]),
+                "range": float(bounds[1]),
+                "max": float(bounds[0] + bounds[1]),
+            }
+
+        self._lid_startup_diagnostics.append({
+            "label": str(label),
+            "available": True,
+            "handle": _read(lambda: int(j.get_handle())),
+            "current_angle": _read(lambda: float(j.get_joint_position())),
+            "target_position": _read(lambda: float(j.get_joint_target_position())),
+            "target_velocity": _read(lambda: float(j.get_joint_target_velocity())),
+            "velocity": _read(lambda: float(j.get_joint_velocity())),
+            "joint_force": _read(lambda: float(j.get_joint_force())),
+            "joint_mode": _read(lambda: j.get_joint_mode()),
+            "motor_enabled": _read(lambda: bool(j.is_motor_enabled())),
+            "control_loop_enabled": _read(lambda: bool(j.is_control_loop_enabled())),
+            "motor_locked_at_zero_velocity": _read(lambda: bool(j.is_motor_locked_at_zero_velocity())),
+            "joint_interval": interval,
+            "closed_reference_angle": float(self._closed_lid_angle),
+        })
 
     def get_object(self, name):
         """Get object by name."""
@@ -511,6 +560,12 @@ class GrillTaskEnv:
         Keep startup state stable without changing scene's collidable/respondable flags.
         """
         self.stabilize_task_objects()
+        if self._preserve_scene_lid_pose:
+            if self.lid_joint is not None:
+                self.hold_startup_lid_pose()
+                self._capture_lid_joint_diagnostics("after_startup_stabilize", self.lid_joint)
+            return
+
         hold_angle = self._closed_lid_angle
         if self.lid_joint is not None:
             self.set_lid_servo_lock(True)
@@ -530,14 +585,15 @@ class GrillTaskEnv:
                 except Exception:
                     pass
             self.pr.step()
-        if self.lid_joint is not None and self._preserve_scene_lid_pose:
-            try:
-                self._closed_lid_angle = float(self.lid_joint.get_joint_position())
-                os.environ["GRILL_LID_CLOSED_ANGLE"] = f"{self._closed_lid_angle:.6f}"
-            except Exception:
-                pass
         if self.lid_joint is not None and (not self._preserve_scene_lid_pose):
             self.set_lid_collision_enabled(True)
+
+    def hold_startup_lid_pose(self):
+        """Re-assert the scene-authored lid pose during initialization settles."""
+        if self.lid_joint is None or not self._preserve_scene_lid_pose:
+            return False
+        self.set_lid_servo_lock(True)
+        return self._set_lid_angle_hard(float(self._closed_lid_angle), hold_steps=0)
 
     def set_lid_servo_lock(self, lock=True):
         """Enable/disable a strong servo hold on the lid joint."""

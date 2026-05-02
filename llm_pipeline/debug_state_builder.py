@@ -68,11 +68,63 @@ def _load_env(task_family: str, scene_path: str, headless: bool):
 def _lid_joint_debug_info(env) -> dict[str, Any]:
     lid_joint = getattr(env, "lid_joint", None)
     current_angle = None
+    target_position = None
+    target_velocity = None
+    joint_velocity = None
+    joint_force = None
+    joint_mode = None
+    motor_enabled = None
+    control_loop_enabled = None
+    motor_locked_at_zero_velocity = None
+    joint_interval = None
     if lid_joint is not None:
         try:
             current_angle = float(lid_joint.get_joint_position())
         except Exception:
             current_angle = None
+        try:
+            target_position = float(lid_joint.get_joint_target_position())
+        except Exception:
+            target_position = None
+        try:
+            target_velocity = float(lid_joint.get_joint_target_velocity())
+        except Exception:
+            target_velocity = None
+        try:
+            joint_velocity = float(lid_joint.get_joint_velocity())
+        except Exception:
+            joint_velocity = None
+        try:
+            joint_force = float(lid_joint.get_joint_force())
+        except Exception:
+            joint_force = None
+        try:
+            mode = lid_joint.get_joint_mode()
+            joint_mode = getattr(mode, "name", str(mode))
+        except Exception:
+            joint_mode = None
+        try:
+            motor_enabled = bool(lid_joint.is_motor_enabled())
+        except Exception:
+            motor_enabled = None
+        try:
+            control_loop_enabled = bool(lid_joint.is_control_loop_enabled())
+        except Exception:
+            control_loop_enabled = None
+        try:
+            motor_locked_at_zero_velocity = bool(lid_joint.is_motor_locked_at_zero_velocity())
+        except Exception:
+            motor_locked_at_zero_velocity = None
+        try:
+            cyclic, interval = lid_joint.get_joint_interval()
+            joint_interval = {
+                "cyclic": bool(cyclic),
+                "min": float(interval[0]),
+                "range": float(interval[1]),
+                "max": float(interval[0] + interval[1]),
+            }
+        except Exception:
+            joint_interval = None
 
     closed_angle = getattr(env, "_closed_lid_angle", None)
     try:
@@ -92,13 +144,107 @@ def _lid_joint_debug_info(env) -> dict[str, Any]:
 
     return {
         "current_angle": current_angle,
+        "target_position": target_position,
+        "target_velocity": target_velocity,
+        "joint_velocity": joint_velocity,
+        "joint_force": joint_force,
+        "joint_mode": joint_mode,
+        "motor_enabled": motor_enabled,
+        "control_loop_enabled": control_loop_enabled,
+        "motor_locked_at_zero_velocity": motor_locked_at_zero_velocity,
+        "joint_interval": joint_interval,
         "closed_reference_angle": closed_angle,
         "initial_angle_after_env_load": initial_angle,
         "delta_from_closed_reference": delta_from_closed,
+        "delta_target_from_closed_reference": (
+            None
+            if target_position is None or closed_angle is None
+            else target_position - closed_angle
+        ),
+        "delta_current_from_target": (
+            None
+            if current_angle is None or target_position is None
+            else current_angle - target_position
+        ),
         "preserve_scene_lid_pose": bool(getattr(env, "_preserve_scene_lid_pose", False)),
+        "startup_diagnostics": list(getattr(env, "_lid_startup_diagnostics", []) or []),
         "env_GRILL_LID_CLOSED_ANGLE": os.environ.get("GRILL_LID_CLOSED_ANGLE"),
         "env_GRILL_PRESERVE_SCENE_LID_POSE": os.environ.get("GRILL_PRESERVE_SCENE_LID_POSE"),
     }
+
+
+def _object_alias(handle: int) -> str:
+    try:
+        from pyrep.backend import sim
+
+        return str(sim.simGetObjectAlias(int(handle), 5))
+    except Exception:
+        try:
+            from pyrep.backend import sim
+
+            return str(sim.simGetObjectName(int(handle)))
+        except Exception:
+            return str(handle)
+
+
+def _lid_contact_debug_info(env) -> dict[str, Any]:
+    lid = getattr(env, "grill_lid", None)
+    if lid is None:
+        return {"available": False, "contacts": [], "contact_count": 0}
+
+    try:
+        lid_handle = int(lid.get_handle())
+    except Exception:
+        lid_handle = None
+
+    contacts = []
+    try:
+        raw_contacts = lid.get_contact(None, get_contact_normal=True)
+    except Exception:
+        raw_contacts = []
+
+    for contact in raw_contacts or []:
+        handles = [int(h) for h in contact.get("contact_handles", [])]
+        other_handles = [h for h in handles if lid_handle is None or h != lid_handle]
+        contacts.append({
+            "handles": handles,
+            "other_handles": other_handles,
+            "other_aliases": [_object_alias(h) for h in other_handles],
+            "contact": [float(v) for v in contact.get("contact", [])],
+        })
+
+    return {
+        "available": True,
+        "lid_handle": lid_handle,
+        "contact_count": len(contacts),
+        "contacts": contacts,
+    }
+
+
+def _lid_drift_probe(env, steps: int) -> list[dict[str, Any]]:
+    if steps <= 0:
+        return []
+    samples = []
+    for step_idx in range(int(steps) + 1):
+        lid_info = _lid_joint_debug_info(env)
+        contact_info = _lid_contact_debug_info(env)
+        samples.append({
+            "step": step_idx,
+            "current_angle": lid_info.get("current_angle"),
+            "target_position": lid_info.get("target_position"),
+            "delta_current_from_target": lid_info.get("delta_current_from_target"),
+            "joint_velocity": lid_info.get("joint_velocity"),
+            "joint_force": lid_info.get("joint_force"),
+            "contact_count": contact_info.get("contact_count"),
+            "contact_aliases": sorted({
+                alias
+                for contact in contact_info.get("contacts", [])
+                for alias in contact.get("other_aliases", [])
+            }),
+        })
+        if step_idx < int(steps):
+            env.pr.step()
+    return samples
 
 
 def _state_summary(state) -> dict[str, Any]:
@@ -195,9 +341,16 @@ def _format_scene_report(
         f"- Pose map objects: {_format_list(summary['pose_map_keys'])}",
         f"- Gripper: {summary['gripper_state'].get('status', 'unknown')}",
         f"- Lid joint current angle: {lid_joint.get('current_angle')}",
+        f"- Lid joint target position: {lid_joint.get('target_position')}",
         f"- Lid joint closed reference: {lid_joint.get('closed_reference_angle')}",
         f"- Lid joint initial angle after env load: {lid_joint.get('initial_angle_after_env_load')}",
         f"- Lid joint delta from closed reference: {lid_joint.get('delta_from_closed_reference')}",
+        f"- Lid joint target delta from closed reference: {lid_joint.get('delta_target_from_closed_reference')}",
+        f"- Lid joint current delta from target: {lid_joint.get('delta_current_from_target')}",
+        f"- Lid joint mode: {lid_joint.get('joint_mode')}",
+        f"- Lid motor enabled: {lid_joint.get('motor_enabled')}",
+        f"- Lid control loop enabled: {lid_joint.get('control_loop_enabled')}",
+        f"- Lid motor locked at zero velocity: {lid_joint.get('motor_locked_at_zero_velocity')}",
         f"- Preserve scene lid pose: {lid_joint.get('preserve_scene_lid_pose')}",
         "",
         "## Semantic Facts",
@@ -257,6 +410,82 @@ def _format_scene_report(
             )
     else:
         lines.append("(none)")
+
+    startup_diagnostics = lid_joint.get("startup_diagnostics") or []
+    if startup_diagnostics:
+        lines.extend([
+            "",
+            "## Lid Startup Diagnostics",
+            "",
+            "| Checkpoint | Current | Target | Current-target | Mode | Motor | Control loop | Velocity lock | Interval |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ])
+        for item in startup_diagnostics:
+            current = item.get("current_angle")
+            target = item.get("target_position")
+            delta = None if current is None or target is None else current - target
+            interval = item.get("joint_interval") or {}
+            interval_text = (
+                "(none)"
+                if not interval
+                else f"{interval.get('min')}..{interval.get('max')} cyclic={interval.get('cyclic')}"
+            )
+            lines.append(
+                "| "
+                f"{item.get('label')} | "
+                f"{current} | "
+                f"{target} | "
+                f"{delta} | "
+                f"{item.get('joint_mode')} | "
+                f"{item.get('motor_enabled')} | "
+                f"{item.get('control_loop_enabled')} | "
+                f"{item.get('motor_locked_at_zero_velocity')} | "
+                f"{interval_text} |"
+            )
+
+    lid_contacts = lid_joint.get("contacts") or {}
+    if lid_contacts.get("available"):
+        lines.extend([
+            "",
+            "## Lid Contact Diagnostics",
+            "",
+            f"- Contact count: {lid_contacts.get('contact_count')}",
+        ])
+        contacts = lid_contacts.get("contacts") or []
+        if contacts:
+            lines.extend([
+                "",
+                "| Contact | Other objects | Raw handles |",
+                "| ---: | --- | --- |",
+            ])
+            for idx, contact in enumerate(contacts, start=1):
+                lines.append(
+                    "| "
+                    f"{idx} | "
+                    f"{_format_list(contact.get('other_aliases', []))} | "
+                    f"{contact.get('other_handles', [])} |"
+                )
+    drift_probe = lid_joint.get("drift_probe") or []
+    if drift_probe:
+        lines.extend([
+            "",
+            "## Lid Drift Probe",
+            "",
+            "| Step | Current | Target | Current-target | Velocity | Force | Contacts | Contact objects |",
+            "| ---: | --- | --- | --- | --- | --- | ---: | --- |",
+        ])
+        for sample in drift_probe:
+            lines.append(
+                "| "
+                f"{sample.get('step')} | "
+                f"{sample.get('current_angle')} | "
+                f"{sample.get('target_position')} | "
+                f"{sample.get('delta_current_from_target')} | "
+                f"{sample.get('joint_velocity')} | "
+                f"{sample.get('joint_force')} | "
+                f"{sample.get('contact_count')} | "
+                f"{_format_list(sample.get('contact_aliases', []))} |"
+            )
 
     lines.extend([
         "",
@@ -355,6 +584,8 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
         state = pipeline._build_scene_state()
         summary = _state_summary(state)
         summary["lid_joint"] = _lid_joint_debug_info(env)
+        summary["lid_joint"]["contacts"] = _lid_contact_debug_info(env)
+        summary["lid_joint"]["drift_probe"] = _lid_drift_probe(env, args.lid_drift_probe_steps)
 
         snapshot = summary["snapshot"] or {}
 
@@ -425,6 +656,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Extra simulator steps after pipeline initialization.",
+    )
+    parser.add_argument(
+        "--lid-drift-probe-steps",
+        type=int,
+        default=0,
+        help="After scene-state capture, step the simulator and record lid angle/contact samples.",
     )
     parser.add_argument(
         "--skip-prompt",

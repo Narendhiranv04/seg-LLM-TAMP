@@ -237,12 +237,17 @@ class FakeEnv:
 
     def __init__(self):
         self.pr = self.PR()
+        self.startup_lid_hold_calls = 0
 
     def get_home_conf(self):
         return [0.0] * 7
 
     def set_robot_conf(self, conf):
         self.conf = list(conf)
+
+    def hold_startup_lid_pose(self):
+        self.startup_lid_hold_calls += 1
+        return True
 
 
 def _snapshot() -> SegmentationSnapshot:
@@ -303,6 +308,23 @@ def test_pipeline_replans_with_previous_direct_actions() -> None:
     assert segmentation_adapter.refresh_calls[:2] == ['initial', 'initial']
     assert segmentation_adapter.action_sequence_calls[0]['actions'] == []
     assert segmentation_adapter.live_updates >= 1
+
+
+def test_initialize_holds_startup_lid_pose_during_settle() -> None:
+    planner = QueuePlanner(['move\nopen(box_lid)'])
+    snapshot = _snapshot()
+    segmentation_adapter = FakeSegmentationAdapter(snapshot)
+    env = FakeEnv()
+    pipeline = LLMOnlyReplanningPipeline(
+        config=LLMPipelineConfig(model_alias='mock-llm', icl_mode='zero_shot'),
+        planner=planner,
+        segmentation_adapter=segmentation_adapter,
+        failure_checker=FakeFailureChecker(segmentation_adapter, snapshot),
+        executor=FakeExecutor(),
+    )
+
+    assert pipeline.initialize(env=env) is True
+    assert env.startup_lid_hold_calls == 60
 
 
 def test_pipeline_preflight_reports_no_image_input() -> None:
