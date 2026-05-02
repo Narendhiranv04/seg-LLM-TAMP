@@ -55,16 +55,20 @@ class SegmentationObjectDetector:
         self.min_pixels_per_camera = int(os.environ.get('LIVE_SEG_MIN_PIXELS', '10'))
         self.persistence_frames = int(os.environ.get('LIVE_SEG_PERSIST_FRAMES', '30'))
         
-        default_task_objects = {
+        default_kitchen_objects = {
             'mug1', 'mug2', 'mug3', 'mug4',
             'soup', 'mustard', 'spam', 'sugar', 'crackers',
             'box_lid'
+        }
+        default_grill_objects = {
+            'steak', 'chicken', 'spam', 'plate', 'grill_lid'
         }
         env_task_objects = {
             str(name).strip()
             for name, obj in (getattr(self.env, 'name_to_obj', {}) or {}).items()
             if str(name).strip() and obj is not None
         }
+        default_task_objects = default_grill_objects if self._is_grill_env() else default_kitchen_objects
         self.task_objects = default_task_objects | env_task_objects
         self.env_aliases = {
             'mug1': ['mug1', 'mug_table', 'mug_table_shape'],
@@ -90,6 +94,16 @@ class SegmentationObjectDetector:
         self._build_region_handle_mapping()
         
         print(f"[SegmentationDetector] Initialized with {len(self.handle_to_name)} scene objects")
+
+    def _is_grill_env(self):
+        module_name = self.env.__class__.__module__.lower()
+        class_name = self.env.__class__.__name__.lower()
+        return (
+            "grill" in module_name
+            or "grill" in class_name
+            or hasattr(self.env, "grill_lid")
+            or hasattr(self.env, "grill_boundary")
+        )
     
     def _build_handle_mapping(self):
         """Build mapping from CoppeliaSim handles to object names."""

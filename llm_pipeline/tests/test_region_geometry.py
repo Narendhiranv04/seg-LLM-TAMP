@@ -64,6 +64,18 @@ def test_plate_top_beats_plate_boundary_for_meat() -> None:
     assert description == 'on plate'
 
 
+def test_prep_area_beats_table_for_raw_meat() -> None:
+    region_map = {
+        'table': _bounds(-1, -1, 0.0, 1, 1, 0.05),
+        'prep_area': _bounds(0.25, 0.25, 0.05, 0.55, 0.55, 0.06),
+    }
+
+    region, description = resolve_region((0.4, 0.4, 0.11), region_map)
+
+    assert region == 'prep_area'
+    assert description == 'in prep area'
+
+
 def test_box_fallback_used_only_when_primary_absent() -> None:
     fallback_only = {'box_inside_fallback': _bounds(-0.2, -0.2, 0.0, 0.2, 0.2, 0.25)}
     with_primary = {

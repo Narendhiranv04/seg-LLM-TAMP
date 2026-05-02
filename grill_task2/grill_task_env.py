@@ -228,6 +228,7 @@ class GrillTaskEnv:
 
         # Dish rack
         self.dish_rack = _safe_shape('dish_rack')
+        self.prep_area = _safe_shape('prep_area') or _safe_shape('prep-area')
         self.placement_boundary = _safe_shape('placement_boundary') or _safe_shape('box_boundary')
 
         # Success region for placing meat on grill
@@ -272,6 +273,8 @@ class GrillTaskEnv:
             self.regions['plate-boundary'] = self.plate
         if self.dish_rack:
             self.regions['dish_rack'] = self.dish_rack
+        if self.prep_area:
+            self.regions['prep_area'] = self.prep_area
         if self.placement_boundary:
             self.regions['placement_boundary'] = self.placement_boundary
             self.regions['placement-boundary'] = self.placement_boundary

@@ -21,6 +21,7 @@ def test_grill_semantic_facts_separate_grill_top_from_inside_grill() -> None:
             "steak": "grill-top",
             "chicken": "table",
             "spam": "plate-top",
+            "meat1": "prep_area",
             "plate": "dish_rack",
         },
         lid_open=True,
@@ -30,6 +31,7 @@ def test_grill_semantic_facts_separate_grill_top_from_inside_grill() -> None:
     assert "on_grill_top(steak)" in facts
     assert "on_table(chicken)" in facts
     assert "on_plate(spam)" in facts
+    assert "in_prep_area(meat1)" in facts
     assert "plate_at_dish_rack" in facts
     assert not any(fact.startswith("inside_grill") for fact in facts)
 

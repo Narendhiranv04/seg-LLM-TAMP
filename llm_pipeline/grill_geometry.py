@@ -24,6 +24,8 @@ def derive_grill_semantic_facts(
         if object_name in MEAT_OBJECTS:
             if region_name == "grill-top":
                 facts.append(f"on_grill_top({object_name})")
+            elif region_name == "prep_area":
+                facts.append(f"in_prep_area({object_name})")
             elif region_name == "plate-top":
                 facts.append(f"on_plate({object_name})")
             elif region_name == "table":
