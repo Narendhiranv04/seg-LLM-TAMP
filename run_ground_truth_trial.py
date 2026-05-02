@@ -108,8 +108,7 @@ def run_trial(variant_id: str,
               output_path: Optional[Path] = None,
               headless: bool = True,
               record_video: bool = False,
-              keep_alive: bool = False,
-              calibrate_grill_open_replay: bool = False) -> Dict[str, Any]:
+              keep_alive: bool = False) -> Dict[str, Any]:
     spec = get_variant_spec(variant_id)
     if spec.pending:
         raise RuntimeError(f'Variant {spec.variant_id} is pending and cannot be benchmarked yet.')
@@ -128,8 +127,6 @@ def run_trial(variant_id: str,
     if spec.task_family == 'grill':
         env['GRILL_ALLOW_SCENE_OVERRIDE'] = 'True'
         env['GRILL_SCENE_FILE_OVERRIDE'] = spec.scene_path
-        if calibrate_grill_open_replay:
-            env['GRILL_CALIBRATE_OPEN_REPLAY'] = 'True'
 
     command = [sys.executable, spec.gt_runner_path]
     result = _run_command(
@@ -193,11 +190,6 @@ def main() -> None:
     parser.add_argument('--gui', action='store_true', help='Run with simulator GUI instead of headless mode')
     parser.add_argument('--record-video', action='store_true', help='Enable GT video capture for this trial')
     parser.add_argument('--keep-alive', action='store_true', help='Keep simulator alive after GT run')
-    parser.add_argument(
-        '--calibrate-grill-open-replay',
-        action='store_true',
-        help='Generate the precomputed grill-open replay path for the selected grill variant',
-    )
     args = parser.parse_args()
 
     record = run_trial(
@@ -207,7 +199,6 @@ def main() -> None:
         headless=not args.gui,
         record_video=args.record_video,
         keep_alive=args.keep_alive,
-        calibrate_grill_open_replay=args.calibrate_grill_open_replay,
     )
     print(json.dumps(record, indent=2))
 

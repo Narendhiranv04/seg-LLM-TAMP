@@ -112,8 +112,6 @@ OPEN_HANDLE_USE_FALLBACK_ORIENTATIONS = os.environ.get(
     "GRILL_OPEN_HANDLE_USE_FALLBACK_ORIENTATIONS", "False"
 ) == "True"
 OPEN_REPLAY_DIR = os.path.join(THIS_DIR, "precomputed_paths")
-OPEN_REPLAY_PATH_OVERRIDE = os.environ.get("GRILL_OPEN_REPLAY_PATH", "").strip()
-USE_OPEN_REPLAY_PATH = os.environ.get("GRILL_USE_OPEN_REPLAY_PATH", "True") == "True"
 ACTIVE_LID_JOINT_HANDLE = None
 ACTIVE_HANDLE_SHAPE_HANDLE = None
 HANDLE_ANCHOR_PARENT_HANDLE = None
@@ -2769,14 +2767,10 @@ def _densify_open_arc_waypoints(waypoints, steps_per_segment=None):
 
 def _default_open_replay_path(variant_id=None):
     vid = _scene_variant_id() if variant_id is None else str(variant_id).strip().upper()
-    if OPEN_REPLAY_PATH_OVERRIDE:
-        return os.path.abspath(OPEN_REPLAY_PATH_OVERRIDE)
     return os.path.join(OPEN_REPLAY_DIR, f"grill_open_{vid}.json")
 
 
 def _load_open_replay_waypoints(variant_id, current_joint, target_joint):
-    if not USE_OPEN_REPLAY_PATH:
-        return None
     path = _default_open_replay_path(variant_id)
     if not os.path.exists(path):
         return None
@@ -2821,141 +2815,6 @@ def _load_open_replay_waypoints(variant_id, current_joint, target_joint):
         })
     print(f"[open][replay] loaded {len(replay)} waypoints from {path}")
     return replay
-
-
-def _plan_open_arc_by_sampling_actual_handle(
-    *,
-    env,
-    handle,
-    current_joint,
-    target_joint,
-    approach_dir,
-    hover_quat,
-    start_q,
-):
-    h = _resolve_lid_joint_handle(env)
-    if h is None:
-        return None
-
-    approach = _unit_xy(approach_dir)
-    if approach is None:
-        approach = np.array([1.0, 0.0, 0.0], dtype=float)
-    orientation_candidates = [hover_quat]
-    if OPEN_HANDLE_USE_FALLBACK_ORIENTATIONS:
-        orientation_candidates += _orientation_candidates_for_open_face(-approach)
-
-    prev_interval = _relax_joint_interval(h)
-    original_q = list(start_q)
-    original_joint = _get_lid_joint_angle(env)
-    prev_q = np.array(start_q, dtype=float)
-    angles = np.linspace(float(current_joint), float(target_joint), int(OPEN_HANDLE_ARC_POINTS))
-    waypoints = []
-
-    print(
-        f"[open][replay-cal] sampling {len(angles)} actual handle poses "
-        f"with standoff={OPEN_HANDLE_STANDOFF_M:.3f}m",
-        flush=True,
-    )
-    try:
-        for i, a in enumerate(angles):
-            _set_lid_joint_for_arc_planning(env, float(a))
-            try:
-                handle_pos = np.array(handle.get_position(), dtype=float)
-            except Exception:
-                return None
-            target_tip = handle_pos + approach * float(OPEN_HANDLE_STANDOFF_M)
-            if (
-                i == 0
-                or i == len(angles) - 1
-                or (i % int(OPEN_HANDLE_PLAN_LOG_STRIDE)) == 0
-            ):
-                print(
-                    f"[open][replay-cal] sample {i + 1}/{len(angles)} "
-                    f"joint={float(a):.3f} target_tip={np.round(target_tip, 4).tolist()}",
-                    flush=True,
-                )
-
-            solved = None
-            solved_quat_index = None
-            for quat_index, quat in enumerate(orientation_candidates):
-                if quat is None:
-                    continue
-                try:
-                    cfgs = env.robot.solve_ik_via_sampling(
-                        target_tip.tolist(),
-                        quaternion=quat,
-                        max_configs=12,
-                        max_time_ms=max(OPEN_HANDLE_IK_MAX_TIME_MS, 80),
-                        ignore_collisions=True,
-                    )
-                except Exception:
-                    cfgs = None
-                if cfgs is None or len(cfgs) == 0:
-                    continue
-                solved = min(
-                    cfgs,
-                    key=lambda cc: float(np.linalg.norm(np.array(cc, dtype=float) - prev_q)),
-                )
-                solved_quat_index = quat_index
-                break
-
-            if solved is None:
-                if not waypoints:
-                    print(f"[open][replay-cal] no IK for first sample at joint={float(a):.3f}")
-                    return None
-                print(
-                    f"[open][replay-cal] no IK at sample {i + 1}/{len(angles)} "
-                    f"joint={float(a):.3f}; reusing previous config"
-                )
-                solved = waypoints[-1]["q"]
-            elif (
-                i == 0
-                or i == len(angles) - 1
-                or (i % int(OPEN_HANDLE_PLAN_LOG_STRIDE)) == 0
-            ):
-                print(
-                    f"[open][replay-cal] sample {i + 1}/{len(angles)} IK ok "
-                    f"orientation={solved_quat_index}",
-                    flush=True,
-                )
-
-            q = list(solved)
-            waypoints.append({
-                "q": q,
-                "joint": float(a),
-                "target_tip": target_tip,
-            })
-            prev_q = np.array(q, dtype=float)
-    finally:
-        if original_joint is not None:
-            _set_lid_joint_for_arc_planning(env, float(original_joint))
-        env.set_robot_conf(original_q)
-        _restore_joint_interval(h, prev_interval)
-
-    return waypoints
-
-
-def _save_open_replay_waypoints(path, variant_id, current_joint, target_joint, waypoints):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    data = {
-        "variant_id": str(variant_id),
-        "scene_path": SCENE_PATH,
-        "current_joint": float(current_joint),
-        "target_joint": float(target_joint),
-        "standoff_m": float(OPEN_HANDLE_STANDOFF_M),
-        "steps_per_segment": int(OPEN_HANDLE_EXEC_STEPS_PER_SEGMENT),
-        "waypoints": [
-            {
-                "joint": float(wp["joint"]),
-                "q": [float(v) for v in wp["q"]],
-                "target_tip": [float(v) for v in np.array(wp["target_tip"], dtype=float).tolist()],
-            }
-            for wp in waypoints
-        ],
-    }
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2)
-    print(f"[open][replay-cal] saved {len(waypoints)} waypoints to {path}")
 
 
 def _force_lid_closed(env, pr, steps=80):
@@ -4972,74 +4831,6 @@ def run_grill_lid_motion_framework(env, pr, direction, task_name):
     return executor.execute_all()
 
 
-def calibrate_open_replay_path(env, pr, variant_id=None):
-    variant = _scene_variant_id() if variant_id is None else str(variant_id).strip().upper()
-    executor = GrillLidPrimitiveExecutor(env, pr, direction="open", task_name="Calibrate Open Grill Replay")
-    ok, msg = executor.prepare()
-    if not ok:
-        print(f"[open][replay-cal] prepare failed: {msg}")
-        return False
-
-    print("[open][replay-cal] moving to handle and grasping before calibration")
-    ok, msg = executor._move_to_hover()
-    if not ok:
-        print(f"[open][replay-cal] hover failed: {msg}")
-        return False
-    ok, msg = executor._grasp_lid()
-    if not ok:
-        print(f"[open][replay-cal] grasp failed: {msg}")
-        return False
-
-    start_q = env.get_robot_conf()
-    current_joint = _get_lid_joint_angle(env)
-    if current_joint is None:
-        current_joint = float(LID_CLOSED_ANGLE)
-    target_joint = _target_open_joint(current_joint)
-    waypoints = _plan_open_arc_by_sampling_actual_handle(
-        env=env,
-        handle=executor.handle,
-        current_joint=current_joint,
-        target_joint=target_joint,
-        approach_dir=executor.approach_dir,
-        hover_quat=executor.hover_q,
-        start_q=start_q,
-    )
-    if not waypoints:
-        print("[open][replay-cal] failed to generate replay path")
-        return False
-
-    path = _default_open_replay_path(variant)
-    _save_open_replay_waypoints(path, variant, current_joint, target_joint, waypoints)
-
-    print("[open][replay-cal] previewing saved replay path")
-    replay = _densify_open_arc_waypoints(waypoints)
-    arc_samples = []
-    h = _resolve_lid_joint_handle(env)
-    prev_interval = _relax_joint_interval(h) if h is not None else None
-    try:
-        for i, waypoint in enumerate(replay):
-            a = float(waypoint["joint"])
-            env.set_robot_conf(waypoint["q"])
-            _set_lid_joint_for_arc_planning(env, a)
-            step(pr, 1)
-            _record_open_arc_tracking(
-                arc_samples,
-                label="open",
-                index=i,
-                total=len(replay),
-                commanded_joint=a,
-                target_tip=waypoint["target_tip"],
-                env=env,
-                handle=executor.handle,
-            )
-    finally:
-        if h is not None:
-            _restore_joint_interval(h, prev_interval)
-    _print_open_arc_tracking_summary(arc_samples, "open")
-    print(f"[open][replay-cal] calibration complete: {path}")
-    return True
-
-
 def _pick_by_label(items, label):
     for it in items:
         if it["label"] == label:
@@ -5248,24 +5039,6 @@ def main():
         print(f"Lid angle after home lock: {post_home:.3f} rad")
     print(f"[startup] post-home snap_to_{CLOSE_WP_NAME}: {snapped2} | d_close={d_close2 if d_close2 is not None else 'NA'}")
     step(pr, 3)
-
-    if os.environ.get("GRILL_CALIBRATE_OPEN_REPLAY", "False") == "True":
-        ok = calibrate_open_replay_path(env, pr, variant_id=variant_id)
-        summary = {
-            "variant_id": variant_id,
-            "task_family": "grill",
-            "scene_path": SCENE_PATH,
-            "gt_total_subtasks": 1,
-            "gt_completed_subtasks": 1 if ok else 0,
-            "episode_success": bool(ok),
-            "execution_time_s": None,
-            "failure_reason": None if ok else "open_replay_calibration_failed",
-            "task_results": [{"task": "calibrate open replay path", "success": bool(ok)}],
-        }
-        _write_gt_summary(summary)
-        pr.stop()
-        pr.shutdown()
-        return summary
 
     meats = _discover_meat_objects(env)
     plate = _discover_plate(env)
