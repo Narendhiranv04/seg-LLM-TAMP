@@ -3936,7 +3936,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             )
         except Exception:
             configs = None
-        if configs:
+        if configs is not None and len(configs) > 0:
             q_target = min(
                 configs,
                 key=lambda q: float(np.linalg.norm(np.array(q, dtype=float) - np.array(q_current, dtype=float))),
