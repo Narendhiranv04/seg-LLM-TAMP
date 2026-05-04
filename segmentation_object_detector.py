@@ -61,13 +61,18 @@ class SegmentationObjectDetector:
             'box_lid'
         }
         default_grill_objects = {
-            'steak', 'chicken', 'spam', 'plate', 'grill_lid'
+            'steak', 'steak1', 'steak2', 'steak3',
+            'chicken', 'chicken1', 'chicken2', 'chicken3',
+            'spam', 'spam1', 'spam2', 'spam3',
+            'plate', 'grill_lid'
         }
         env_task_objects = {
             str(name).strip()
             for name, obj in (getattr(self.env, 'name_to_obj', {}) or {}).items()
             if str(name).strip() and obj is not None
         }
+        if self._is_grill_env():
+            env_task_objects -= {'meat1', 'meat2'}
         default_task_objects = default_grill_objects if self._is_grill_env() else default_kitchen_objects
         self.task_objects = default_task_objects | env_task_objects
         self.env_aliases = {
@@ -82,9 +87,16 @@ class SegmentationObjectDetector:
             'crackers': ['crackers', 'cereal'],
             'box_lid': ['box_lid'],
             'steak': ['steak', 'steak_visual'],
+            'steak1': ['steak1', 'steak1_visual'],
+            'steak2': ['steak2', 'steak2_visual'],
+            'steak3': ['steak3', 'steak3_visual'],
             'chicken': ['chicken', 'chicken_visual'],
-            'meat1': ['meat1', 'steak', 'steak_visual'],
-            'meat2': ['meat2', 'chicken', 'chicken_visual'],
+            'chicken1': ['chicken1', 'chicken1_visual'],
+            'chicken2': ['chicken2', 'chicken2_visual'],
+            'chicken3': ['chicken3', 'chicken3_visual'],
+            'spam1': ['spam1', 'spam1_visual'],
+            'spam2': ['spam2', 'spam2_visual'],
+            'spam3': ['spam3', 'spam3_visual'],
             'plate': ['plate', 'plate_visual'],
             'grill_lid': ['grill_lid', 'lid', 'lid_visual'],
             'lid': ['lid', 'lid_visual'],
@@ -282,19 +294,21 @@ class SegmentationObjectDetector:
             return 'box_lid'
         if 'plate' in n and 'boundary' not in n:
             return 'plate'
-        if 'steak' in n:
-            return 'steak'
-        if 'chicken' in n:
-            return 'chicken'
-        if re.search(r'\bmeat1\b', n):
-            return 'meat1'
-        if re.search(r'\bmeat2\b', n):
-            return 'meat2'
+        grill_meat = self._canonical_grill_meat_name(n)
+        if grill_meat is not None:
+            return grill_meat
         if 'lid' in n and 'box' not in n:
             return 'grill_lid'
         for name in ('soup', 'mustard', 'spam', 'sugar', 'crackers'):
             if name in n:
                 return name
+        return None
+
+    def _canonical_grill_meat_name(self, lowered_scene_name):
+        for meat_name in ('steak', 'chicken', 'spam'):
+            match = re.search(rf'(^|[^a-z0-9])({meat_name}[0-9]*)([^a-z0-9]|$)', lowered_scene_name)
+            if match:
+                return match.group(2)
         return None
     
     def _get_objects_from_mask(self, handle_mask):

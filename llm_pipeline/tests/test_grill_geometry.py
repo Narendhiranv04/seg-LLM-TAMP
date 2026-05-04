@@ -19,9 +19,10 @@ def test_grill_semantic_facts_treat_grill_top_as_inside_grill() -> None:
     facts = derive_grill_semantic_facts(
         {
             "steak": "grill-top",
+            "steak1": "grill-top",
             "chicken": "table",
             "spam": "plate-top",
-            "meat1": "prep_area",
+            "chicken1": "prep_area",
             "plate": "dish_rack",
         },
         lid_open=True,
@@ -29,9 +30,10 @@ def test_grill_semantic_facts_treat_grill_top_as_inside_grill() -> None:
 
     assert "grill_lid_open" in facts
     assert "inside_grill(steak)" in facts
+    assert "inside_grill(steak1)" in facts
     assert "on_table(chicken)" in facts
     assert "on_plate(spam)" in facts
-    assert "in_prep_area(meat1)" in facts
+    assert "in_prep_area(chicken1)" in facts
     assert "plate_at_dish_rack" in facts
 
 

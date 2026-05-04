@@ -5,7 +5,15 @@ from __future__ import annotations
 from typing import Mapping
 
 
-MEAT_OBJECTS = frozenset({"spam", "steak", "chicken", "meat1", "meat2"})
+MEAT_PREFIXES = ("spam", "steak", "chicken")
+
+
+def _is_grill_meat(object_name: str) -> bool:
+    for prefix in MEAT_PREFIXES:
+        suffix = object_name.removeprefix(prefix)
+        if suffix != object_name and (not suffix or suffix.isdigit()):
+            return True
+    return False
 
 
 def derive_grill_semantic_facts(
@@ -21,7 +29,7 @@ def derive_grill_semantic_facts(
         facts.append("grill_lid_closed")
 
     for object_name, region_name in sorted((object_region_map or {}).items()):
-        if object_name in MEAT_OBJECTS:
+        if _is_grill_meat(object_name):
             if region_name == "grill-top":
                 facts.append(f"inside_grill({object_name})")
             elif region_name == "prep_area":

@@ -40,7 +40,8 @@ Current immediate focus:
 2. Grill domain next.
 3. Re-run base static scene-state reports for G1, G2, and G3 with grill-specific supported regions.
 4. Treat meat on `grill-top` as `inside_grill`, because executable `grill-top` maps to the scene object `grill_boundary`, which represents the inside-grill area.
-5. After static grill accuracy is understood, test progression/dynamic snapshots
+5. Preserve numbered grill meats as distinct object ids, e.g. `steak` and `steak1`, instead of collapsing them to broad meat labels.
+6. After static grill accuracy is understood, test progression/dynamic snapshots
    after actions such as opening the grill and moving meat to the plate.
 
 ## K1

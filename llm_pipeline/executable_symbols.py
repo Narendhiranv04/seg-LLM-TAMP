@@ -27,10 +27,17 @@ DEFAULT_OBJECT_ORDER: Tuple[str, ...] = (
 )
 GRILL_OBJECT_ORDER: Tuple[str, ...] = (
     "steak",
+    "steak1",
+    "steak2",
+    "steak3",
     "chicken",
-    "meat1",
-    "meat2",
+    "chicken1",
+    "chicken2",
+    "chicken3",
     "spam",
+    "spam1",
+    "spam2",
+    "spam3",
     "plate",
     "grill_lid",
     "lid",
@@ -101,6 +108,8 @@ def _objects_from_env(env) -> Tuple[str, ...]:
     names = []
     for name in (getattr(env, "name_to_obj", {}) or {}).keys():
         token = str(name).strip()
+        if _is_grill_env(env) and token in {"meat1", "meat2"}:
+            continue
         if token:
             names.append(token)
     return _dedupe_preserve_order(names)
