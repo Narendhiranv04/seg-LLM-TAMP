@@ -20,6 +20,7 @@ from llm_pipeline.debug_state_builder import (
     NoOpExecutor,
     NoOpPlanner,
     _format_scene_report,
+    _lid_joint_debug_info,
     _load_env,
     _state_summary,
 )
@@ -75,7 +76,27 @@ def _compact_signature(summary: dict[str, Any]) -> dict[str, Any]:
             if object_region_map.get(name)
         },
         "gripper_state": dict(summary.get("gripper_state", {}) or {}),
+        "lid_joint": _stable_lid_joint_signature(summary.get("lid_joint", {}) or {}),
     }
+
+
+def _stable_lid_joint_signature(lid_joint: dict[str, Any]) -> dict[str, Any]:
+    signature = {}
+    for key in (
+        "current_angle",
+        "target_position",
+        "closed_reference_angle",
+        "delta_from_closed_reference",
+        "delta_target_from_closed_reference",
+        "delta_current_from_target",
+        "preserve_scene_lid_pose",
+    ):
+        value = lid_joint.get(key)
+        if isinstance(value, float):
+            value = round(value, 4)
+        if value is not None:
+            signature[key] = value
+    return signature
 
 
 def _signature_changes(
@@ -107,6 +128,11 @@ def _signature_changes(
     new_gripper = current.get("gripper_state", {}) or {}
     if old_gripper != new_gripper:
         changes.append(f"gripper: {old_gripper} -> {new_gripper}")
+
+    old_lid = previous.get("lid_joint", {}) or {}
+    new_lid = current.get("lid_joint", {}) or {}
+    if old_lid != new_lid:
+        changes.append(f"lid_joint: {old_lid} -> {new_lid}")
 
     return changes
 
@@ -246,6 +272,7 @@ def monitor_live_state(args: argparse.Namespace) -> int:
             polls += 1
             state = pipeline._build_scene_state()
             summary = _state_summary(state)
+            summary["lid_joint"] = _lid_joint_debug_info(env)
             signature = _compact_signature(summary)
             changes = _signature_changes(previous_signature, signature)
 

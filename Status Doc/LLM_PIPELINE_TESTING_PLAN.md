@@ -242,12 +242,18 @@ python3 llm_pipeline/debug_state_builder.py --variant K3 --skip-prompt --json
 python3 llm_pipeline/debug_state_builder.py --variant G1 --skip-prompt --json
 python3 llm_pipeline/debug_state_builder.py --variant G2 --skip-prompt --json
 python3 llm_pipeline/debug_state_builder.py --variant G3 --skip-prompt --json
+
+# Grill live manual check.
+python3 llm_pipeline/live_state_monitor.py --variant G1 --json --poll-interval 0.5
+python3 llm_pipeline/live_state_monitor.py --variant G2 --json --poll-interval 0.5
+python3 llm_pipeline/live_state_monitor.py --variant G3 --json --poll-interval 0.5
 ```
 
 Output:
 
 ```text
 Reports are saved under Status Doc/scene_state_reports/.
+Live captures are saved under Status Doc/live_scene_state_reports/.
 ```
 
 Goal:
@@ -264,6 +270,19 @@ G1 after opening grill
 G3 initial
 G3 after opening grill
 ```
+
+For live grill checks, run from the nested repo after activating the simulator
+environment:
+
+```bash
+source /home/paddy/miniconda3/etc/profile.d/conda.sh
+conda activate rlbench
+source ../../env_setup.sh
+python3 llm_pipeline/live_state_monitor.py --variant G1 --json --poll-interval 0.5
+```
+
+The live monitor writes a new capture when visible objects, object-region
+assignments, gripper state, or the grill lid joint state changes.
 
 Success criteria:
 
