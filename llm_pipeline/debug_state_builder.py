@@ -155,6 +155,17 @@ def _state_summary(state) -> dict[str, Any]:
     }
 
 
+def _detector_debug_info(pipeline) -> dict[str, Any]:
+    adapter = getattr(pipeline, "segmentation_adapter", None)
+    detector = getattr(adapter, "detector", None)
+    if detector is None:
+        return {}
+    return {
+        "min_pixels_per_camera": getattr(detector, "min_pixels_per_camera", None),
+        "persistence_frames": getattr(detector, "persistence_frames", None),
+    }
+
+
 def _format_list(values: list[str]) -> str:
     return ", ".join(values) if values else "(none)"
 
@@ -175,6 +186,7 @@ def _format_scene_report(
     object_region_map = summary.get("object_region_map", {})
     object_region_descriptions = summary.get("object_region_descriptions", {})
     lid_joint = summary.get("lid_joint", {})
+    detector = summary.get("detector", {})
 
     if not visible_objects:
         result = "FAIL"
@@ -208,6 +220,8 @@ def _format_scene_report(
         f"- Supported regions: {_format_list(snapshot.get('supported_regions', []))}",
         f"- Pose map objects: {_format_list(summary['pose_map_keys'])}",
         f"- Gripper: {summary['gripper_state'].get('status', 'unknown')}",
+        f"- Detector min pixels per camera: {detector.get('min_pixels_per_camera')}",
+        f"- Detector persistence frames: {detector.get('persistence_frames')}",
         f"- Lid joint current angle: {lid_joint.get('current_angle')}",
         f"- Lid joint target position: {lid_joint.get('target_position')}",
         f"- Lid joint closed reference: {lid_joint.get('closed_reference_angle')}",
@@ -372,6 +386,7 @@ def debug_state_recognition(args: argparse.Namespace) -> int:
         state = pipeline._build_scene_state()
         summary = _state_summary(state)
         summary["lid_joint"] = _lid_joint_debug_info(env)
+        summary["detector"] = _detector_debug_info(pipeline)
 
         snapshot = summary["snapshot"] or {}
 

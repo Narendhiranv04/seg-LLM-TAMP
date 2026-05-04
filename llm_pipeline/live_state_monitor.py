@@ -20,6 +20,7 @@ from llm_pipeline.debug_state_builder import (
     NoOpExecutor,
     NoOpPlanner,
     _format_scene_report,
+    _detector_debug_info,
     _lid_joint_debug_info,
     _load_env,
     _state_summary,
@@ -273,6 +274,7 @@ def monitor_live_state(args: argparse.Namespace) -> int:
             state = pipeline._build_scene_state()
             summary = _state_summary(state)
             summary["lid_joint"] = _lid_joint_debug_info(env)
+            summary["detector"] = _detector_debug_info(pipeline)
             signature = _compact_signature(summary)
             changes = _signature_changes(previous_signature, signature)
 

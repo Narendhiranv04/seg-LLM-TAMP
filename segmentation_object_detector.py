@@ -52,7 +52,10 @@ class SegmentationObjectDetector:
         self.pixel_totals = {}
 
         # Fusion settings
-        self.min_pixels_per_camera = int(os.environ.get('LIVE_SEG_MIN_PIXELS', '10'))
+        is_grill_env = self._is_grill_env()
+        default_min_pixels = 50 if is_grill_env else 10
+        configured_min_pixels = int(os.environ.get('LIVE_SEG_MIN_PIXELS', str(default_min_pixels)))
+        self.min_pixels_per_camera = max(configured_min_pixels, 50) if is_grill_env else configured_min_pixels
         self.persistence_frames = int(os.environ.get('LIVE_SEG_PERSIST_FRAMES', '30'))
         
         default_kitchen_objects = {
@@ -110,11 +113,16 @@ class SegmentationObjectDetector:
     def _is_grill_env(self):
         module_name = self.env.__class__.__module__.lower()
         class_name = self.env.__class__.__name__.lower()
+        region_names = {str(name).lower() for name in (getattr(self.env, "regions", {}) or {}).keys()}
+        object_names = {str(name).lower() for name in (getattr(self.env, "name_to_obj", {}) or {}).keys()}
         return (
             "grill" in module_name
             or "grill" in class_name
             or hasattr(self.env, "grill_lid")
             or hasattr(self.env, "grill_boundary")
+            or "grill-top" in region_names
+            or "inside_grill" in region_names
+            or "grill_lid" in object_names
         )
     
     def _build_handle_mapping(self):

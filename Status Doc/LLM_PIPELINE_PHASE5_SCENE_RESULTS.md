@@ -41,7 +41,8 @@ Current immediate focus:
 3. Re-run base static scene-state reports for G1, G2, and G3 with grill-specific supported regions.
 4. Use `inside_grill` as the LLM-facing region for the scene object `grill_boundary`; keep `grill-top` only as a backward-compatible executable alias.
 5. Preserve numbered grill meats as distinct object ids, e.g. `steak` and `steak1`, instead of collapsing them to broad meat labels.
-6. After static grill accuracy is understood, test progression/dynamic snapshots
+6. Use a stricter default grill segmentation threshold so tiny closed-lid mask leaks do not count as visible objects.
+7. After static grill accuracy is understood, test progression/dynamic snapshots
    after actions such as opening the grill and moving meat to the plate.
 
 ## K1
@@ -80,7 +81,7 @@ Current immediate focus:
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PARTIAL | Yes | Partial | Partial | Detected steak, chicken, plate, grill_lid. steak mapped to the grill boundary and plate maps to plate/dish_rack; chicken and grill_lid lack mask_regions. Re-run after canonical `inside_grill` rename. |
+| Initial snapshot | PARTIAL | Partial | Partial | Partial | Fresh report `20260504_141751_G2_scene_state.md` used the new `inside_grill` region and detected steak/steak1/chicken/plate/grill_lid, but closed-lid `steak` visibility was only 18 front-camera pixels with no visual region evidence. Grill default mask threshold was raised; re-run before marking PASS. |
 | After opening grill |  |  |  |  |  |
 | Other scenario |  |  |  |  |  |
 
