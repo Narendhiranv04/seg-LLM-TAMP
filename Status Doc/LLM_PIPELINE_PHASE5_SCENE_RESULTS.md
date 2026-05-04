@@ -25,7 +25,7 @@ Date: 2026-04-30
 Tester: manual terminal runs
 Branch/commit: kitchen-region-rename-latest / through 64210d9
 Command(s): python llm_pipeline/debug_state_builder.py --variant <scene> --skip-prompt --json
-Notes: Kitchen static scene-state reports now pass with geometric region assignments. Grill work is in progress: supported regions are now grill-specific in code, and grill semantic facts are reported separately from raw geometric regions. Fresh G1/G2/G3 reports are needed after these changes.
+Notes: Kitchen static scene-state reports pass with geometric region assignments. Grill static and live scene-state checks now use grill-specific regions, preserve numbered meat ids, and report `inside_grill` for `grill_boundary`.
 ```
 
 ## Manual Verification Plan
@@ -34,16 +34,15 @@ Open each variation in CoppeliaSim and compare the visible objects, regions, and
 containment facts against the saved `debug_state_builder.py` report. Use those
 manual checks to correct the scene-state builder.
 
-Current immediate focus:
+Current status:
 
 1. Kitchen static snapshots are concrete enough to move on.
-2. Grill domain next.
-3. Re-run base static scene-state reports for G1, G2, and G3 with grill-specific supported regions.
-4. Use `inside_grill` as the LLM-facing region for the scene object `grill_boundary`; keep `grill-top` only as a backward-compatible executable alias.
-5. Preserve numbered grill meats as distinct object ids, e.g. `steak` and `steak1`, instead of collapsing them to broad meat labels.
-6. Use a stricter default grill segmentation threshold so tiny closed-lid mask leaks do not count as visible objects.
-7. After static grill accuracy is understood, test progression/dynamic snapshots
-   after actions such as opening the grill and moving meat to the plate.
+2. Grill static snapshots are concrete enough to move on.
+3. Grill dynamic/live snapshots are working after manual grill state changes.
+4. `inside_grill` is the LLM-facing region for scene object `grill_boundary`; `grill-top` remains only as a backward-compatible executable alias.
+5. Numbered grill meats stay distinct object ids, e.g. `steak` and `steak1`, instead of collapsing to broad meat labels.
+6. Grill segmentation uses a stricter default threshold so tiny closed-lid mask leaks do not count as visible objects.
+7. Next phase: failure checker validation without LLM calls.
 
 ## K1
 
@@ -73,22 +72,22 @@ Current immediate focus:
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PARTIAL | Yes | Partial | Partial | Report `20260430_211632_G1_scene_state.md` detected spam, chicken, plate, grill_lid, but exposed kitchen-only supported regions and overclaimed semantic readiness. Code now hides kitchen regions for grill and reports grill semantic facts; re-run this snapshot before marking PASS. |
-| After opening grill |  |  |  |  |  |
+| Initial snapshot | PASS | Yes | Yes | Yes | Latest report `20260504_141705_G1_scene_state.md`: closed grill detected chicken, plate, grill_lid with grill-specific regions and `grill_lid_closed`; hidden inside object is not falsely reported visible. |
+| After opening grill | PASS | Yes | Yes | Yes | Live monitor captures grill lid changes and refreshed object-region state after manual changes. |
 | Other scenario |  |  |  |  |  |
 
 ## G2
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PARTIAL | Partial | Partial | Partial | Fresh report `20260504_141751_G2_scene_state.md` used the new `inside_grill` region and detected steak/steak1/chicken/plate/grill_lid, but closed-lid `steak` visibility was only 18 front-camera pixels with no visual region evidence. Grill default mask threshold was raised; re-run before marking PASS. |
-| After opening grill |  |  |  |  |  |
+| Initial snapshot | PASS | Yes | Yes | Yes | Fresh closed-grill report after threshold fix no longer treats tiny 18-pixel mask leaks as visible. Visible objects/regions match the camera-visible state. |
+| After opening grill | PASS | Yes | Yes | Yes | Live report `20260504_143459_G2_frame0029_scene_state.md`: detector threshold 50, lid open, steak/steak1/chicken visible with `inside_grill` evidence and semantic facts. |
 | Other scenario |  |  |  |  |  |
 
 ## G3
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PARTIAL | Yes | Partial | Partial | Detected spam, steak, chicken, plate, grill_lid. spam/steak mapped to the grill boundary and plate maps to plate/dish_rack; chicken and grill_lid lack mask_regions. Re-run after canonical `inside_grill` rename. |
-| After opening grill |  |  |  |  |  |
+| Initial snapshot | PASS | Yes | Yes | Yes | Latest report `20260504_141810_G3_scene_state.md`: closed grill detected steak1, chicken, plate, grill_lid with grill-specific regions and `grill_lid_closed`; hidden inside objects are not falsely reported visible. |
+| After opening grill | PASS | Yes | Yes | Yes | Live monitor path has been validated on grill scenes; state changes produce new captures with updated lid/object-region facts. |
 | Other scenario |  |  |  |  |  |

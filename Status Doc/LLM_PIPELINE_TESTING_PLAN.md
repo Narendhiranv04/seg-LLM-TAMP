@@ -145,7 +145,8 @@ success/failure profile as GT.
 Concrete command:
 
 ```text
-No dedicated command yet.
+No dedicated command yet. Next work item is to create a small fixture/replay
+test around captured scene-state snapshots.
 ```
 
 Goal:
@@ -221,11 +222,22 @@ Important cases:
 - New objects visible after opening a box/grill.
 - Mug placed on top of box/lid should be classified as target-region or Z
   validation failure, not high-level planning failure.
+- Grill object hidden while lid is closed should be treated as not visible for
+  pick preconditions.
+- Grill object becoming visible after opening should be classified as a new
+  object/state update, not a planner failure.
 
 Success criteria:
 
 ```text
 Failures are classified accurately enough to support future replanning.
+```
+
+Starting evidence:
+
+```text
+Use Phase 5 saved reports under Status Doc/scene_state_reports/ and
+Status Doc/live_scene_state_reports/ as captured-state fixtures.
 ```
 
 ### Phase 5: Scene State / Segmentation Snapshot
@@ -404,16 +416,15 @@ hand-written sequences.
 
 ## Immediate Next Step
 
-Fix the scene-state generator through manual verification, starting with the
-kitchen domain.
+Start Phase 4 failure-checker validation without LLM calls.
 
 ```text
-1. Open the base static kitchen scenes in CoppeliaSim.
-2. Compare K1/K2/K3 manually against saved debug_state_builder.py reports.
-3. Correct scene-state generation for visible objects, regions, and containment.
-4. After static snapshots are reliable, test progression/dynamic snapshots after
-   state changes such as opening the box or moving objects.
+1. Inventory the current failure checker entrypoints and data contracts.
+2. Choose a minimal captured-state fixture format from Phase 5 reports.
+3. Add focused tests for missing object, wrong target region, and new object
+   after opening box/grill.
+4. Keep the tests model-free and simulator-free first.
 ```
 
 Executor parity with hand-written GT remains the next pipeline-level target
-after scene-state accuracy is corrected.
+after failure-checker behavior is understood.
