@@ -15,6 +15,7 @@ class GrillEnv:
 
     regions = {
         "grill-top": object(),
+        "inside_grill": object(),
         "prep_area": object(),
         "plate-top": object(),
         "plate_boundary": object(),
@@ -31,7 +32,7 @@ def test_grill_symbol_registry_hides_kitchen_region_aliases() -> None:
 
     assert registry.regions == (
         "prep_area",
-        "grill-top",
+        "inside_grill",
         "plate-top",
         "plate_boundary",
         "dish_rack",

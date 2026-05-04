@@ -18,13 +18,19 @@ def test_normalize_region_names_deduplicates_aliases() -> None:
 
 
 def test_grill_region_aliases_normalize_to_public_symbols() -> None:
+    assert normalize_region_name("grill-top") == "inside_grill"
+    assert normalize_region_name("grill_top") == "inside_grill"
     assert normalize_region_name("plate-boundary") == "plate_boundary"
     assert normalize_region_name("prep-area") == "prep_area"
     assert normalize_region_name("prep_area") == "prep_area"
-    assert normalize_region_names(["plate-boundary", "plate_boundary"]) == ["plate_boundary"]
+    assert normalize_region_names(["grill-top", "inside_grill", "plate-boundary", "plate_boundary"]) == [
+        "inside_grill",
+        "plate_boundary",
+    ]
 
 
 def test_grill_regions_map_to_scene_objects() -> None:
+    assert scene_object_for_region("inside_grill") == "grill_boundary"
     assert scene_object_for_region("grill-top") == "grill_boundary"
     assert scene_object_for_region("prep_area") == "prep_area"
     assert scene_object_for_region("plate-top") == "plate_boundary"

@@ -40,7 +40,7 @@ def test_groceries_boundary_beats_table() -> None:
     assert region == 'groceries_boundary'
 
 
-def test_grill_top_beats_table_for_meat() -> None:
+def test_inside_grill_beats_table_for_meat() -> None:
     region_map = {
         'table': _bounds(-1, -1, 0.0, 1, 1, 0.05),
         'grill-top': _bounds(-0.2, -0.2, 0.12, 0.2, 0.2, 0.14),
@@ -48,8 +48,8 @@ def test_grill_top_beats_table_for_meat() -> None:
 
     region, description = resolve_region((0.0, 0.0, 0.20), region_map)
 
-    assert region == 'grill-top'
-    assert description == 'on grill top'
+    assert region == 'inside_grill'
+    assert description == 'inside grill'
 
 
 def test_plate_top_beats_plate_boundary_for_meat() -> None:

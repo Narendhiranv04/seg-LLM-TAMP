@@ -18,6 +18,8 @@ KITCHEN_REGION_ALIASES = {
 }
 
 GRILL_REGION_ALIASES = {
+    "grill-top": "inside_grill",
+    "grill_top": "inside_grill",
     "plate-boundary": "plate_boundary",
     "prep-area": "prep_area",
 }
@@ -36,7 +38,7 @@ CANONICAL_KITCHEN_REGION_ORDER = (
 CANONICAL_GRILL_REGION_ORDER = (
     "table",
     "prep_area",
-    "grill-top",
+    "inside_grill",
     "plate-top",
     "plate_boundary",
     "dish_rack",
@@ -53,7 +55,7 @@ CANONICAL_REGION_SCENE_OBJECTS = {
     "box_inside_fallback": "box_base",
     "cupboard_lower": "cupboard_boundary",
     "cupboard_upper": "cupboard_boundary_top",
-    "grill-top": "grill_boundary",
+    "inside_grill": "grill_boundary",
     "plate-top": "plate_boundary",
 }
 
@@ -66,7 +68,7 @@ REGION_SEMANTICS = {
     "groceries_boundary": "groceries/source area on the table",
     "box_lid_top": "support surface on top of the box lid for objects resting on the lid",
     "box_inside_fallback": "internal broad box evidence; not a planner target",
-    "grill-top": "top surface of the grill; meat here is on the grill but not necessarily inside a closed grill",
+    "inside_grill": "inside-grill containment area represented by the scene object grill_boundary",
     "prep_area": "preparation area where uncooked meat starts",
     "plate-top": "top surface of the plate for placing cooked meat",
     "plate_boundary": "target area where the plate should be placed",

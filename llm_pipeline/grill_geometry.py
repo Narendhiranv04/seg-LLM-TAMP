@@ -21,7 +21,7 @@ def derive_grill_semantic_facts(
     *,
     lid_open: bool | None = None,
 ) -> list[str]:
-    """Return grill facts using grill_boundary/grill-top as inside-grill evidence."""
+    """Return grill facts using inside_grill geometry from grill_boundary."""
     facts = []
     if lid_open is True:
         facts.append("grill_lid_open")
@@ -30,7 +30,7 @@ def derive_grill_semantic_facts(
 
     for object_name, region_name in sorted((object_region_map or {}).items()):
         if _is_grill_meat(object_name):
-            if region_name == "grill-top":
+            if region_name == "inside_grill":
                 facts.append(f"inside_grill({object_name})")
             elif region_name == "prep_area":
                 facts.append(f"in_prep_area({object_name})")

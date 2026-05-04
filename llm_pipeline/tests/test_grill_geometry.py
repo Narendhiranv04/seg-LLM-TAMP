@@ -18,8 +18,8 @@ class Env:
 def test_grill_semantic_facts_treat_grill_top_as_inside_grill() -> None:
     facts = derive_grill_semantic_facts(
         {
-            "steak": "grill-top",
-            "steak1": "grill-top",
+            "steak": "inside_grill",
+            "steak1": "inside_grill",
             "chicken": "table",
             "spam": "plate-top",
             "chicken1": "prep_area",

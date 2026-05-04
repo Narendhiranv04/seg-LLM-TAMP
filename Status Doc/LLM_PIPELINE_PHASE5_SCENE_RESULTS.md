@@ -39,7 +39,7 @@ Current immediate focus:
 1. Kitchen static snapshots are concrete enough to move on.
 2. Grill domain next.
 3. Re-run base static scene-state reports for G1, G2, and G3 with grill-specific supported regions.
-4. Treat meat on `grill-top` as `inside_grill`, because executable `grill-top` maps to the scene object `grill_boundary`, which represents the inside-grill area.
+4. Use `inside_grill` as the LLM-facing region for the scene object `grill_boundary`; keep `grill-top` only as a backward-compatible executable alias.
 5. Preserve numbered grill meats as distinct object ids, e.g. `steak` and `steak1`, instead of collapsing them to broad meat labels.
 6. After static grill accuracy is understood, test progression/dynamic snapshots
    after actions such as opening the grill and moving meat to the plate.
@@ -80,7 +80,7 @@ Current immediate focus:
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PARTIAL | Yes | Partial | Partial | Detected steak, chicken, plate, grill_lid. steak maps to grill-top and plate maps to plate/dish_rack; chicken and grill_lid lack mask_regions. |
+| Initial snapshot | PARTIAL | Yes | Partial | Partial | Detected steak, chicken, plate, grill_lid. steak mapped to the grill boundary and plate maps to plate/dish_rack; chicken and grill_lid lack mask_regions. Re-run after canonical `inside_grill` rename. |
 | After opening grill |  |  |  |  |  |
 | Other scenario |  |  |  |  |  |
 
@@ -88,6 +88,6 @@ Current immediate focus:
 
 | Scenario | Result | Visible objects match GT? | Regions match GT? | Containment facts match GT? | Notes / failure reason |
 | --- | --- | --- | --- | --- | --- |
-| Initial snapshot | PARTIAL | Yes | Partial | Partial | Detected spam, steak, chicken, plate, grill_lid. spam/steak map to grill-top and plate maps to plate/dish_rack; chicken and grill_lid lack mask_regions. |
+| Initial snapshot | PARTIAL | Yes | Partial | Partial | Detected spam, steak, chicken, plate, grill_lid. spam/steak mapped to the grill boundary and plate maps to plate/dish_rack; chicken and grill_lid lack mask_regions. Re-run after canonical `inside_grill` rename. |
 | After opening grill |  |  |  |  |  |
 | Other scenario |  |  |  |  |  |
