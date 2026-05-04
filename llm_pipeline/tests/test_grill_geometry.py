@@ -15,7 +15,7 @@ class Env:
         self._closed_lid_angle = closed
 
 
-def test_grill_semantic_facts_separate_grill_top_from_inside_grill() -> None:
+def test_grill_semantic_facts_treat_grill_top_as_inside_grill() -> None:
     facts = derive_grill_semantic_facts(
         {
             "steak": "grill-top",
@@ -28,12 +28,11 @@ def test_grill_semantic_facts_separate_grill_top_from_inside_grill() -> None:
     )
 
     assert "grill_lid_open" in facts
-    assert "on_grill_top(steak)" in facts
+    assert "inside_grill(steak)" in facts
     assert "on_table(chicken)" in facts
     assert "on_plate(spam)" in facts
     assert "in_prep_area(meat1)" in facts
     assert "plate_at_dish_rack" in facts
-    assert not any(fact.startswith("inside_grill") for fact in facts)
 
 
 def test_infer_grill_lid_open_from_joint_angle() -> None:

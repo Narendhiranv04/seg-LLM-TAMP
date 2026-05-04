@@ -39,7 +39,7 @@ Current immediate focus:
 1. Kitchen static snapshots are concrete enough to move on.
 2. Grill domain next.
 3. Re-run base static scene-state reports for G1, G2, and G3 with grill-specific supported regions.
-4. Check that meat on `grill-top` is not treated as `inside_grill` unless a later explicit grill-containment fact supports it.
+4. Treat meat on `grill-top` as `inside_grill`, because executable `grill-top` maps to the scene object `grill_boundary`, which represents the inside-grill area.
 5. After static grill accuracy is understood, test progression/dynamic snapshots
    after actions such as opening the grill and moving meat to the plate.
 
