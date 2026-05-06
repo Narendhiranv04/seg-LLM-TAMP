@@ -1,6 +1,6 @@
 [submodule "RLBench"]
 	path = RLBench
-	url = git@github-mechapuru:mechapuru/Robust-TAMP-RLbench.git
+	url = https://github.com/mechapuru/Robust-TAMP-RLbench.git
 [submodule "pddlstream"]
 	path = pddlstream
-	url = git@github-mechapuru:mechapuru/Robust-TAMP-PDDLStream.git
+	url = https://github.com/mechapuru/Robust-TAMP-PDDLStream.git
