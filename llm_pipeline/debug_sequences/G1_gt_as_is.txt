@@ -1,0 +1,37 @@
+# GT-as-is executor replay sequence for G1.
+# Progress lines below are updated by llm_pipeline/debug_execution.py.
+
+name: G1_gt_as_is
+variant: G1
+goal: Replay G1 ground-truth concrete sequence through llm_pipeline executor.
+status: pending
+last_run: 
+last_exit_code: 
+last_success: 
+completed_actions: 0/22
+last_completed_action: 
+failure_id: 
+failure_source: 
+failure_message: 
+move(grill_lid)
+open(grill_lid)
+move(spam)
+pick(spam)
+move(table)
+place(spam, table)
+move(chicken)
+pick(chicken)
+move(inside_grill)
+place(chicken, inside_grill)
+move(grill_lid)
+close(grill_lid)
+move(plate)
+pick(plate)
+move(plate_boundary)
+place(plate, plate_boundary)
+move(grill_lid)
+open(grill_lid)
+move(chicken)
+pick(chicken)
+move(plate-top)
+place(chicken, plate-top)

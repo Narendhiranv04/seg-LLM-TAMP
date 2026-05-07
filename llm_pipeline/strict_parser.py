@@ -11,7 +11,7 @@ from llm_pipeline.pipeline_types import DirectAction
 from llm_pipeline.region_aliases import normalize_region_name
 
 
-ACTION_CALL = re.compile(r'^(pick|place|open)\(([A-Za-z0-9_-]+)(?:,\s*([A-Za-z0-9_-]+))?\)$')
+ACTION_CALL = re.compile(r'^(pick|place|open|close)\(([A-Za-z0-9_-]+)(?:,\s*([A-Za-z0-9_-]+))?\)$')
 
 
 @dataclass
@@ -68,7 +68,7 @@ class StrictActionParser:
             match = ACTION_CALL.fullmatch(line)
             if not match:
                 raise StrictParseError(
-                    'Invalid syntax. Expected move, pick(obj), place(obj, region), or open(box_lid)',
+                    'Invalid syntax. Expected move, pick(obj), place(obj, region), open(lid), or close(lid)',
                     line_number=index,
                 )
 
@@ -129,19 +129,27 @@ class StrictActionParser:
                 actions.append(DirectAction('place', (arg0, target_region)))
                 continue
 
-            if arg0 != 'box_lid' or arg1 is not None:
-                raise StrictParseError(
-                    'open accepts exactly open(box_lid)',
-                    line_number=index,
-                    failure_id='unknown_action_token',
-                )
-            if holding is not None:
-                raise StrictParseError(
-                    f"Cannot open(box_lid) while holding '{holding}'",
-                    line_number=index,
-                    failure_id='missing_post_pick_place',
-                )
-            actions.append(DirectAction('open', ('box_lid',)))
+            if action_name in ('open', 'close'):
+                if arg1 is not None:
+                    raise StrictParseError(
+                        f'{action_name} accepts exactly {action_name}(lid_object)',
+                        line_number=index,
+                        failure_id='unknown_action_token',
+                    )
+                if arg0 not in self.valid_objects or arg0 not in {'box_lid', 'grill_lid', 'lid'}:
+                    raise StrictParseError(
+                        f"Unknown or unsupported lid object '{arg0}'",
+                        line_number=index,
+                        failure_id='unknown_action_token',
+                    )
+                if holding is not None:
+                    raise StrictParseError(
+                        f"Cannot {action_name}({arg0}) while holding '{holding}'",
+                        line_number=index,
+                        failure_id='missing_post_pick_place',
+                    )
+                actions.append(DirectAction(action_name, (arg0,)))
+                continue
 
         if holding is not None:
             raise StrictParseError(
@@ -149,15 +157,15 @@ class StrictActionParser:
                 failure_id='missing_post_pick_place',
             )
 
-        # Validate: every pick/place/open must be preceded by a move
+        # Validate: every pick/place/open/close must be preceded by a move
         for i, action in enumerate(actions):
-            if action.action_name in ('pick', 'place', 'open'):
+            if action.action_name in ('pick', 'place', 'open', 'close'):
                 if i == 0 or actions[i - 1].action_name != 'move':
                     prev = str(actions[i - 1]) if i > 0 else '(start of plan)'
                     raise StrictParseError(
                         f"'{action}' must be preceded by a move action, "
                         f"but the previous action was '{prev}'. "
-                        f"Insert move before every pick, place, and open.",
+                        f"Insert move before every pick, place, open, and close.",
                         failure_id='missing_preceding_move',
                     )
 

@@ -22,14 +22,26 @@ from enum import Enum
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import VLM pipeline modules
-from vlm_pipeline.vlm_planner import ActionSkeleton, PlanResult
-
 # PDDLStream
 from pddlstream.algorithms.meta import solve
 from pddlstream.language.constants import PDDLProblem, And
 from pddlstream.utils import read
-import ground_truth_orchestrator as gt
+
+
+@dataclass
+class ActionSkeleton:
+    """Lightweight action skeleton used by the executor."""
+    action_name: str
+    args: Tuple[str, ...]
+
+    def __str__(self):
+        return f"{self.action_name}({', '.join(self.args)})"
+
+
+def _ground_truth_orchestrator():
+    import ground_truth_orchestrator as gt
+
+    return gt
 
 # ============================================================
 # OBJECT NAME MAPPING (VLM names <-> Environment names)
@@ -869,6 +881,7 @@ class VLMExecutorV2:
             return None, "Environment not set"
 
         if self._active_transfer is None:
+            gt = _ground_truth_orchestrator()
             self._active_transfer = gt.create_primitive_transfer_executor(
                 self.env,
                 object_name,

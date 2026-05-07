@@ -1,0 +1,45 @@
+# GT-as-is executor replay sequence for G2.
+# Progress lines below are updated by llm_pipeline/debug_execution.py.
+
+name: G2_gt_as_is
+variant: G2
+goal: Replay G2 ground-truth concrete sequence through llm_pipeline executor.
+status: pending
+last_run: 
+last_exit_code: 
+last_success: 
+completed_actions: 0/30
+last_completed_action: 
+failure_id: 
+failure_source: 
+failure_message: 
+move(grill_lid)
+open(grill_lid)
+move(plate)
+pick(plate)
+move(plate_boundary)
+place(plate, plate_boundary)
+move(steak)
+pick(steak)
+move(plate-top)
+place(steak, plate-top)
+move(chicken)
+pick(chicken)
+move(inside_grill)
+place(chicken, inside_grill)
+move(steak1)
+pick(steak1)
+move(inside_grill)
+place(steak1, inside_grill)
+move(grill_lid)
+close(grill_lid)
+move(grill_lid)
+open(grill_lid)
+move(chicken)
+pick(chicken)
+move(plate-top)
+place(chicken, plate-top)
+move(steak1)
+pick(steak1)
+move(plate-top)
+place(steak1, plate-top)

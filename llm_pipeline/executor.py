@@ -33,20 +33,33 @@ from vlm_pipeline.vlm_executor_v2 import (
     _place_release_segment_index,
     quaternion_from_euler,
 )
-try:
+quaternion_rotate_vector = None
+compute_tip_attachment = None
+update_attached_pose = None
+create_primitive_transfer_executor = None
+run_open_box = None
+
+
+def _ensure_kitchen_gt_imports() -> None:
+    global quaternion_rotate_vector
+    global compute_tip_attachment
+    global update_attached_pose
+    global create_primitive_transfer_executor
+    global run_open_box
+    if create_primitive_transfer_executor is not None and run_open_box is not None:
+        return
     from ground_truth_orchestrator import (
-        quaternion_rotate_vector,
-        compute_tip_attachment,
-        update_attached_pose,
-        create_primitive_transfer_executor,
-        run_open_box,
+        quaternion_rotate_vector as _quaternion_rotate_vector,
+        compute_tip_attachment as _compute_tip_attachment,
+        update_attached_pose as _update_attached_pose,
+        create_primitive_transfer_executor as _create_primitive_transfer_executor,
+        run_open_box as _run_open_box,
     )
-except Exception:
-    quaternion_rotate_vector = None
-    compute_tip_attachment = None
-    update_attached_pose = None
-    create_primitive_transfer_executor = None
-    run_open_box = None
+    quaternion_rotate_vector = _quaternion_rotate_vector
+    compute_tip_attachment = _compute_tip_attachment
+    update_attached_pose = _update_attached_pose
+    create_primitive_transfer_executor = _create_primitive_transfer_executor
+    run_open_box = _run_open_box
 
 
 @dataclass
@@ -71,6 +84,9 @@ class AbstractBundlingHandler:
     def execute_open(self, o_action: DirectAction) -> Tuple[bool, str]:
         raise NotImplementedError
 
+    def execute_close(self, c_action: DirectAction) -> Tuple[bool, str]:
+        raise NotImplementedError
+
 
 class KitchenBundlingHandler(AbstractBundlingHandler):
     """Bundling rituals for the Kitchen scene."""
@@ -84,6 +100,7 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
         
         task_label = f"LLM Bundle: {obj_name} -> {target_region}"
         
+        _ensure_kitchen_gt_imports()
         if create_primitive_transfer_executor is None:
             return False, "GT executors not available. Check ground_truth_orchestrator imports."
 
@@ -116,6 +133,7 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
         print(f"[KITCHEN-BUNDLE] --- Starting GT Open Ritual ---")
         self.executor.go_home()
         
+        _ensure_kitchen_gt_imports()
         if run_open_box is None:
             return False, "run_open_box not available."
             
@@ -128,6 +146,9 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
             
         print(f"[KITCHEN-BUNDLE] ✓ Open Complete.")
         return True, ""
+
+    def execute_close(self, c_action: DirectAction) -> Tuple[bool, str]:
+        return False, "Close is not supported for kitchen scenes."
 
 
 class GrillBundlingHandler(AbstractBundlingHandler):
@@ -145,9 +166,13 @@ class GrillBundlingHandler(AbstractBundlingHandler):
                 sys.path.insert(0, GRILL_DIR)
             
             script_path = os.path.join(GRILL_DIR, "ground_truth_orchestrator_variation1 copy.py")
-            spec = importlib.util.spec_from_file_location("grill_gt", script_path)
-            self.grill_gt = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(self.grill_gt)
+            if "grill_gt" in sys.modules:
+                self.grill_gt = sys.modules["grill_gt"]
+            else:
+                spec = importlib.util.spec_from_file_location("grill_gt", script_path)
+                self.grill_gt = importlib.util.module_from_spec(spec)
+                sys.modules["grill_gt"] = self.grill_gt
+                spec.loader.exec_module(self.grill_gt)
             
             # Initialize globals needed by run_grill_lid_motion
             print("[GRILL-BUNDLE] Initializing Grill Globals for Lid Motion...")
@@ -167,7 +192,8 @@ class GrillBundlingHandler(AbstractBundlingHandler):
 
     def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
         obj_name = p_action.args[0]
-        target_region = pl_action.args[1]
+        target_region = normalize_region_name(pl_action.args[1])
+        gt_target_region = "grill-top" if target_region == "inside_grill" else target_region
         is_plate = "plate" in obj_name.lower()
         print(f"[GRILL-BUNDLE] --- Starting GT Transfer Ritual: {obj_name} -> {target_region} ---")
         
@@ -182,17 +208,17 @@ class GrillBundlingHandler(AbstractBundlingHandler):
             return False, f"Object {obj_name} not found"
             
         # Dynamically compute target pose using _region_slot_pose
-        count = self.placed_counts.get(target_region, 0)
+        count = self.placed_counts.get(gt_target_region, 0)
         target_pose = None
         if not is_plate:
-            target_pose = self.grill_gt._region_slot_pose(self.env, target_obj, target_region, slot_idx=count, slot_count=3)
-            self.placed_counts[target_region] = count + 1
+            target_pose = self.grill_gt._region_slot_pose(self.env, target_obj, gt_target_region, slot_idx=count, slot_count=3)
+            self.placed_counts[gt_target_region] = count + 1
             
         success = self.grill_gt.run_pick_place(
             self.env,
             self.env.pr,
             obj_name=obj_name,
-            target_region=target_region,
+            target_region=gt_target_region,
             task_name=f"LLM Bundle: {obj_name} -> {target_region}",
             is_plate=is_plate,
             target_pose=target_pose
@@ -207,25 +233,36 @@ class GrillBundlingHandler(AbstractBundlingHandler):
         return True, ""
 
     def execute_open(self, o_action: DirectAction) -> Tuple[bool, str]:
-        print(f"[GRILL-BUNDLE] --- Starting GT Open Ritual ---")
+        return self._execute_lid_motion("open", "Open")
+
+    def execute_close(self, c_action: DirectAction) -> Tuple[bool, str]:
+        return self._execute_lid_motion("close", "Close")
+
+    def _execute_lid_motion(self, direction: str, label: str) -> Tuple[bool, str]:
+        print(f"[GRILL-BUNDLE] --- Starting GT {label} Ritual ---")
         self.executor.go_home()
         
         if self.grill_gt is None:
             return False, "Grill GT not available"
             
-        success = self.grill_gt.run_grill_lid_motion(
+        lid_motion = getattr(
+            self.grill_gt,
+            "run_grill_lid_motion_framework",
+            self.grill_gt.run_grill_lid_motion,
+        )
+        success = lid_motion(
             self.env,
             self.env.pr,
-            direction="open",
-            task_name="LLM Bundle: Open Grill Lid"
+            direction=direction,
+            task_name=f"LLM Bundle: {label} Grill Lid"
         )
         
         self.executor.go_home()
         
         if not success:
-             return False, "Open failed"
+             return False, f"{label} failed"
              
-        print(f"[GRILL-BUNDLE] ✓ Open Complete.")
+        print(f"[GRILL-BUNDLE] ✓ {label} Complete.")
         return True, ""
 
 
@@ -269,18 +306,23 @@ class UnifiedActionBundler:
                         )
                     return 4, ok, err, failure
 
-        # 2. Pattern: [Move, Open] -> Open
+        # 2. Pattern: [Move, Open/Close] -> Lid motion
         if action.action_name == 'move' and (index + 1) < len(actions):
             next1 = actions[index + 1]
-            if next1.action_name == 'open':
-                ok, err = self.handler.execute_open(next1)
+            if next1.action_name in ('open', 'close'):
+                if next1.action_name == 'open':
+                    ok, err = self.handler.execute_open(next1)
+                    failure_id = "TAMP_OPEN_ERROR"
+                else:
+                    ok, err = self.handler.execute_close(next1)
+                    failure_id = "TAMP_CLOSE_ERROR"
                 failure = None
                 if not ok:
                     failure = FailureEvent(
-                        failure_id="TAMP_OPEN_ERROR",
+                        failure_id=failure_id,
                         stage=FailureStage.AFTER_EXECUTION,
                         source=FailureSource.EXECUTOR,
-                        action=f"open({next1.args[0]})",
+                        action=f"{next1.action_name}({next1.args[0]})",
                         evidence={"error": err, "target": next1.args[0]},
                         should_replan=True,
                         message=err

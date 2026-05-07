@@ -13,6 +13,7 @@ from llm_pipeline.region_aliases import (
 
 
 ACTION_SYMBOLS: Tuple[str, ...] = ("move", "pick", "place", "open")
+GRILL_ACTION_SYMBOLS: Tuple[str, ...] = ("move", "pick", "place", "open", "close")
 DEFAULT_OBJECT_ORDER: Tuple[str, ...] = (
     "mug1",
     "mug2",
@@ -172,7 +173,7 @@ def build_runtime_symbol_registry(env=None, detected_objects=None, context_aggre
     """
     del context_aggregator
     return RuntimeSymbolRegistry(
-        actions=ACTION_SYMBOLS,
+        actions=GRILL_ACTION_SYMBOLS if _is_grill_env(env) else ACTION_SYMBOLS,
         objects=_objects_from_detected(detected_objects, env=env),
         regions=_regions_from_env(env),
     )

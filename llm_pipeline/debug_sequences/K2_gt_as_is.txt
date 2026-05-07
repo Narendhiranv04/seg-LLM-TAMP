@@ -1,0 +1,41 @@
+# GT-as-is executor replay sequence for K2.
+# Progress lines below are updated by llm_pipeline/debug_execution.py.
+
+name: K2_gt_as_is
+variant: K2
+goal: Replay K2 ground-truth concrete sequence through llm_pipeline executor.
+status: pending
+last_run: 
+last_exit_code: 
+last_success: 
+completed_actions: 0/26
+last_completed_action: 
+failure_id: 
+failure_source: 
+failure_message: 
+move(mug3)
+pick(mug3)
+move(placement_boundary)
+place(mug3, placement_boundary)
+move(sugar)
+pick(sugar)
+move(cupboard_lower)
+place(sugar, cupboard_lower)
+move(mug2)
+pick(mug2)
+move(placement_boundary)
+place(mug2, placement_boundary)
+move(box_lid)
+open(box_lid)
+move(soup)
+pick(soup)
+move(cupboard_lower)
+place(soup, cupboard_lower)
+move(mug2)
+pick(mug2)
+move(box_storage)
+place(mug2, box_storage)
+move(mug3)
+pick(mug3)
+move(box_storage)
+place(mug3, box_storage)
