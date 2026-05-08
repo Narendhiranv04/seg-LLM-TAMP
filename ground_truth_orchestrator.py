@@ -1903,8 +1903,8 @@ def run_open_box(env, task_name=""):
         return False
 
     pos_before = list(obj.get_position())
-    target_open_xy = float(os.environ.get("LID_OPEN_TARGET_DISPLACEMENT", "0.28"))
-    min_open_xy = float(os.environ.get("LID_OPEN_MIN_DISPLACEMENT", "0.24"))
+    target_open_xy = float(os.environ.get("LID_OPEN_TARGET_DISPLACEMENT", "0.45"))
+    min_open_xy = float(os.environ.get("LID_OPEN_MIN_DISPLACEMENT", "0.45"))
     target_open_xy = max(target_open_xy, min_open_xy)
 
     env.gripper.actuate(1.0, 0.1)

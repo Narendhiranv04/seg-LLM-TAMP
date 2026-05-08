@@ -851,7 +851,10 @@ def main():
         task_name="Task 4: Open Box Lid",
     )
     # Treat partially opened lids as retryable before downstream box placements.
-    min_lid_open_for_mugs = float(os.environ.get("V3_MIN_LID_OPEN_FOR_MUGS", "0.18"))
+    min_lid_open_for_mugs = float(os.environ.get(
+        "V3_MIN_LID_OPEN_FOR_MUGS",
+        os.environ.get("LID_OPEN_TARGET_DISPLACEMENT", "0.45"),
+    ))
     lid_ok = _ensure_lid_open_for_box_tasks(
         env,
         lid_closed_ref,
