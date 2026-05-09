@@ -628,22 +628,61 @@ def grasp_object(env, pr, target_obj, is_plate=False):
         pass
 
     close_velocity = 0.08 if is_flat_pick else 0.12
-    _close_gripper_fully(env, pr, velocity=close_velocity, max_steps=170 if is_flat_pick else 120)
+    close_steps = 170 if is_flat_pick else 120
+    if is_plate:
+        close_velocity = float(os.environ.get("GRILL_PLATE_GRASP_CLOSE_VELOCITY", "0.10"))
+        close_steps = int(os.environ.get("GRILL_PLATE_GRASP_CLOSE_STEPS", "170"))
+        print(
+            "[PlateGrasp] starting attach attempts "
+            f"object={obj_name or '<unknown>'} "
+            f"bbox_h={obj_height:.4f} span={obj_span:.4f} "
+            f"close_velocity={close_velocity:.3f} close_steps={close_steps}"
+        )
+    _close_gripper_fully(env, pr, velocity=close_velocity, max_steps=close_steps)
 
     grasped = False
     attempts = 5 if is_flat_pick else 3
+    if is_plate:
+        attempts = int(os.environ.get("GRILL_PLATE_GRASP_ATTACH_ATTEMPTS", "6"))
     for attempt in range(attempts):
-        if not is_plate:
+        if not is_plate or attempt > 0:
             try:
                 target_obj.set_dynamic(True)
             except Exception:
                 pass
+        if is_plate:
+            detected_before = _gripper_detects(env, target_obj)
+            try:
+                tip_pos = env.robot.get_tip().get_position()
+                obj_pos = target_obj.get_position()
+                tip_obj_dist = float(np.linalg.norm(np.array(tip_pos, dtype=float) - np.array(obj_pos, dtype=float)))
+            except Exception:
+                tip_obj_dist = float("nan")
+            print(
+                "[PlateGrasp] attempt "
+                f"{attempt + 1}/{attempts}: "
+                f"detected_before={detected_before} "
+                f"tip_obj_dist={tip_obj_dist:.4f}"
+            )
         try:
             env.gripper.grasp(target_obj)
         except Exception:
             pass
-        step(pr, 10 if is_flat_pick else 6)
+        step(pr, 10 if (is_flat_pick or is_plate) else 6)
         grasped = _target_is_grasped(env, target_obj)
+        if is_plate:
+            detected_after = _gripper_detects(env, target_obj)
+            try:
+                grasped_names = [str(o.get_name()) for o in env.gripper.get_grasped_objects()]
+            except Exception:
+                grasped_names = []
+            print(
+                "[PlateGrasp] attempt "
+                f"{attempt + 1}/{attempts}: "
+                f"detected_after={detected_after} "
+                f"grasped={grasped} "
+                f"grasped_objects={grasped_names}"
+            )
         if grasped:
             break
 
@@ -653,13 +692,22 @@ def grasp_object(env, pr, target_obj, is_plate=False):
             except Exception:
                 pass
             if _gripper_detects(env, target_obj):
-                _close_gripper_fully(env, pr, velocity=0.06 if is_flat_pick else close_velocity, max_steps=90)
+                retry_velocity = 0.06 if is_flat_pick else close_velocity
+                retry_steps = 120 if is_plate else 90
+                if is_plate:
+                    print(
+                        "[PlateGrasp] proximity detected; "
+                        f"retrying close velocity={retry_velocity:.3f} steps={retry_steps}"
+                    )
+                _close_gripper_fully(env, pr, velocity=retry_velocity, max_steps=retry_steps)
 
     if not is_plate and not grasped:
         try:
             target_obj.set_dynamic(True)
         except Exception:
             pass
+    if is_plate:
+        print(f"[PlateGrasp] final grasped={grasped}")
     step(pr, 8)
     return grasped
 

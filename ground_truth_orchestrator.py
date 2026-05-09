@@ -1856,7 +1856,7 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
 def create_primitive_transfer_executor(env, object_name, target_region, task_name=""):
     obj = env.get_object(object_name)
     pos = obj.get_position() if obj is not None else None
-    
+
     def _is_in_region_local(p, r_name):
         if p is None: return False
         r = env.regions.get(r_name)
@@ -1867,15 +1867,47 @@ def create_primitive_transfer_executor(env, object_name, target_region, task_nam
                 ry + r_min_y - 0.1 <= p[1] <= ry + r_max_y + 0.1 and
                 rz + r_min_z - 0.15 <= p[2] <= rz + r_max_z + 0.15)
 
+    def _log_transfer_route(caller_name, executor_name, box_mode):
+        to_box = target_region in ['box_boundary', 'box-inside']
+        in_box = _is_in_region_local(pos, 'box_boundary')
+        scene_file = os.environ.get("KITCHEN_SCENE_FILE", "")
+        scene_name = os.path.basename(scene_file) if scene_file else "default"
+        pos_text = "None" if pos is None else "[" + ", ".join(f"{float(v):.3f}" for v in pos[:3]) + "]"
+        print(
+            "[TransferRoute] "
+            f"scene={scene_name} "
+            f"task={task_name!r} "
+            f"caller={caller_name} "
+            f"executor={executor_name} "
+            f"object={object_name} "
+            f"target_region={target_region} "
+            f"object_pos={pos_text} "
+            f"in_box_boundary={in_box} "
+            f"target_is_box={to_box} "
+            f"box_mode={bool(box_mode)} "
+            f"pick_impl={'_pick_box' if box_mode else '_pick_standard'} "
+            f"place_impl={'_place_box' if box_mode else '_place_standard'}"
+        )
+
     if _is_in_region_local(pos, 'cupboard_boundary') or _is_in_region_local(pos, 'cupboard_boundary_top'):
+        _log_transfer_route(
+            "create_primitive_transfer_executor",
+            "CupboardPrimitiveTransferExecutor",
+            False,
+        )
         return CupboardPrimitiveTransferExecutor(
             env, object_name, target_region, task_name=task_name
         )
 
     to_box = target_region in ['box_boundary', 'box-inside']
     in_box = _is_in_region_local(pos, 'box_boundary')
-    
+
     if in_box or to_box:
+        _log_transfer_route(
+            "create_primitive_transfer_executor",
+            "PDDLPrimitiveTransferExecutor",
+            True,
+        )
         return PDDLPrimitiveTransferExecutor(
             env,
             object_name,
@@ -1883,7 +1915,12 @@ def create_primitive_transfer_executor(env, object_name, target_region, task_nam
             task_name=task_name,
             box_mode=True,
         )
-        
+
+    _log_transfer_route(
+        "create_primitive_transfer_executor",
+        "PDDLPrimitiveTransferExecutor",
+        False,
+    )
     return PDDLPrimitiveTransferExecutor(
         env,
         object_name,
@@ -1892,7 +1929,54 @@ def create_primitive_transfer_executor(env, object_name, target_region, task_nam
         box_mode=False,
     )
 
+
+def _log_pick_place_route(env, caller_name, object_name, target_region, task_name, box_mode):
+    obj = env.get_object(object_name)
+    pos = obj.get_position() if obj is not None else None
+
+    def _is_in_region_local(p, r_name):
+        if p is None:
+            return False
+        r = env.regions.get(r_name)
+        if not r:
+            return False
+        r_min_x, r_max_x, r_min_y, r_max_y, r_min_z, r_max_z = r.get_bounding_box()
+        rx, ry, rz = r.get_position()
+        return (
+            rx + r_min_x - 0.1 <= p[0] <= rx + r_max_x + 0.1
+            and ry + r_min_y - 0.1 <= p[1] <= ry + r_max_y + 0.1
+            and rz + r_min_z - 0.15 <= p[2] <= rz + r_max_z + 0.15
+        )
+
+    scene_file = os.environ.get("KITCHEN_SCENE_FILE", "")
+    scene_name = os.path.basename(scene_file) if scene_file else "default"
+    pos_text = "None" if pos is None else "[" + ", ".join(f"{float(v):.3f}" for v in pos[:3]) + "]"
+    print(
+        "[TransferRoute] "
+        f"scene={scene_name} "
+        f"task={task_name!r} "
+        f"caller={caller_name} "
+        f"executor=PDDLPrimitiveTransferExecutor "
+        f"object={object_name} "
+        f"target_region={target_region} "
+        f"object_pos={pos_text} "
+        f"in_box_boundary={_is_in_region_local(pos, 'box_boundary')} "
+        f"target_is_box={target_region in ['box_boundary', 'box-inside']} "
+        f"box_mode={bool(box_mode)} "
+        f"pick_impl={'_pick_box' if box_mode else '_pick_standard'} "
+        f"place_impl={'_place_box' if box_mode else '_place_standard'}"
+    )
+
+
 def run_standard_pick_place(env, object_name, target_region, task_name=""):
+    _log_pick_place_route(
+        env,
+        "run_standard_pick_place",
+        object_name,
+        target_region,
+        task_name,
+        False,
+    )
     executor = PDDLPrimitiveTransferExecutor(
         env,
         object_name,
@@ -1903,6 +1987,26 @@ def run_standard_pick_place(env, object_name, target_region, task_name=""):
     return executor.execute_all()
 
 def run_cupboard_pick_place(env, object_name, target_region, task_name=""):
+    scene_file = os.environ.get("KITCHEN_SCENE_FILE", "")
+    scene_name = os.path.basename(scene_file) if scene_file else "default"
+    obj = env.get_object(object_name)
+    pos = obj.get_position() if obj is not None else None
+    pos_text = "None" if pos is None else "[" + ", ".join(f"{float(v):.3f}" for v in pos[:3]) + "]"
+    print(
+        "[TransferRoute] "
+        f"scene={scene_name} "
+        f"task={task_name!r} "
+        "caller=run_cupboard_pick_place "
+        "executor=CupboardPrimitiveTransferExecutor "
+        f"object={object_name} "
+        f"target_region={target_region} "
+        f"object_pos={pos_text} "
+        "in_box_boundary=False "
+        f"target_is_box={target_region in ['box_boundary', 'box-inside']} "
+        "box_mode=False "
+        "pick_impl=CupboardPrimitiveTransferExecutor._pick "
+        "place_impl=CupboardPrimitiveTransferExecutor._place"
+    )
     executor = CupboardPrimitiveTransferExecutor(
         env,
         object_name,
@@ -2039,6 +2143,14 @@ def run_open_box(env, task_name=""):
 
 
 def run_box_pick_place(env, object_name, target_region, task_name=""):
+    _log_pick_place_route(
+        env,
+        "run_box_pick_place",
+        object_name,
+        target_region,
+        task_name,
+        True,
+    )
     executor = PDDLPrimitiveTransferExecutor(
         env,
         object_name,
