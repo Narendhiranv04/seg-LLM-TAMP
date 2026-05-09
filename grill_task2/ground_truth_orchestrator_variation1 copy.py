@@ -1006,19 +1006,26 @@ def run_pick_place(
         cx = 0.5 * (min_x + max_x)
         cy = 0.5 * (min_y + max_y)
         # Release slightly above support and settle after retreat (no snap).
-        release_height = float(os.environ.get("GRILL_PLATE_RELEASE_HEIGHT", "0.015"))
-        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.012"))
+        release_height = float(os.environ.get("GRILL_PLATE_RELEASE_HEIGHT", "0.025"))
+        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.060"))
         # Keep pre-place hover and post-release retrieve hover at the same height.
         pre_place_z_offset = hover_z_offset
         post_release_lift = hover_z_offset
         place_z = float(max_z + release_height)
         pre_place_z = float(place_z + pre_place_z_offset)
 
-        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.16"))
-        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "-0.03"))
+        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.10"))
+        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "0.00"))
         place_pos = [cx + place_x_offset, cy, place_z]
         pre_place_low_pos = [place_pos[0] + hover_dx, cy, place_z]
         pre_place_high_pos = [place_pos[0] + hover_dx, cy, pre_place_z]
+        print(
+            "[plate-place] "
+            f"release_height={release_height:.3f} hover_z_offset={hover_z_offset:.3f} "
+            f"hover_dx={hover_dx:.3f} place_x_offset={place_x_offset:.3f} "
+            f"place_pos={np.round(np.array(place_pos, dtype=float), 4).tolist()} "
+            f"pre_place_high={np.round(np.array(pre_place_high_pos, dtype=float), 4).tolist()}"
+        )
 
         # Horizontal gripper, fingers vertical.
         quat_candidates = [
@@ -4054,17 +4061,24 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         cx = 0.5 * (min_x + max_x)
         cy = 0.5 * (min_y + max_y)
 
-        release_height = float(os.environ.get("GRILL_PLATE_RELEASE_HEIGHT", "0.015"))
-        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.012"))
+        release_height = float(os.environ.get("GRILL_PLATE_RELEASE_HEIGHT", "0.025"))
+        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.060"))
         pre_place_z_offset = hover_z_offset
         place_z = float(max_z + release_height)
         pre_place_z = float(place_z + pre_place_z_offset)
 
-        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.16"))
-        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "-0.03"))
+        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.10"))
+        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "0.00"))
         place_pos = [cx + place_x_offset, cy, place_z]
         pre_place_low_pos = [place_pos[0] + hover_dx, cy, place_z]
         pre_place_high_pos = [place_pos[0] + hover_dx, cy, pre_place_z]
+        print(
+            "[plate-place] "
+            f"release_height={release_height:.3f} hover_z_offset={hover_z_offset:.3f} "
+            f"hover_dx={hover_dx:.3f} place_x_offset={place_x_offset:.3f} "
+            f"place_pos={np.round(np.array(place_pos, dtype=float), 4).tolist()} "
+            f"pre_place_high={np.round(np.array(pre_place_high_pos, dtype=float), 4).tolist()}"
+        )
 
         quat_candidates = [
             quaternion_from_euler(np.pi / 2, 0.0, np.pi / 2),
