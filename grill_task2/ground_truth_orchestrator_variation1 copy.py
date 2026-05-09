@@ -4049,7 +4049,10 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         execute_trajectory(self.env, self.pr, retreat_traj, steps_per_segment=8)
         step(self.pr, 8)
         self._lift_after_plate_pick()
-        self._move_back_home("pick->home")
+        if self.is_plate and os.environ.get("GRILL_PLATE_SKIP_PICK_HOME", "True") == "True":
+            print("[plate-pick] Skipping pick->home; carrying directly toward placement.")
+        else:
+            self._move_back_home("pick->home")
         return True, "pick"
 
     def _prepare_plate_place_path(self):
@@ -4152,7 +4155,10 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
 
     def _move_to_place(self):
         if not self._at_home():
-            self._move_back_home("pre-place->home")
+            if self.is_plate and os.environ.get("GRILL_PLATE_SKIP_PICK_HOME", "True") == "True":
+                print("[plate-place] Skipping pre-place->home; planning from current carry pose.")
+            else:
+                self._move_back_home("pre-place->home")
         self.place_pose = self._resolve_place_pose()
 
         if self.is_plate:
