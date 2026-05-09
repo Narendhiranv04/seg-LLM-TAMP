@@ -510,6 +510,28 @@ class RLBenchKitchenEnv:
                 sample_z = t_max_z + 0.005
             else:
                 sample_z = w_min_z + 0.005
+        elif region_name == 'cupboard_lower':
+            cupboard_padding = float(os.environ.get("CUPBOARD_LOWER_SAMPLE_PADDING", str(padding)))
+            if (w_max_x - w_min_x) < 2 * cupboard_padding:
+                cupboard_padding = 0
+            if (w_max_y - w_min_y) < 2 * cupboard_padding:
+                cupboard_padding = 0
+            min_x = w_min_x + cupboard_padding
+            max_x = w_max_x - cupboard_padding
+            min_y = w_min_y + cupboard_padding
+            max_y = w_max_y - cupboard_padding
+            sample_x, sample_y = sample_clear_xy(
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                max(3, int(os.environ.get("CUPBOARD_LOWER_SAMPLE_GRID", "4"))),
+                float(os.environ.get("CUPBOARD_LOWER_OCCUPANCY_PAD_XY", "0.04")),
+                float(os.environ.get("CUPBOARD_LOWER_OCCUPANCY_PAD_Z", "0.20")),
+            )
+
+            # Keep the previous lower-cupboard Z behavior; only choose clearer XY.
+            sample_z = w_max_z + 0.005
         else:
             sample_x = np.random.uniform(w_min_x + padding, w_max_x - padding)
             sample_y = np.random.uniform(w_min_y + padding, w_max_y - padding)
