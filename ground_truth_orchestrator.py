@@ -856,6 +856,41 @@ def _ensure_lid_open_distance(env, lid_obj, pos_before, desired_xy):
     return False, float(displacement_xy)
 
 
+def lid_open_distance_xy(env, closed_pos_xy):
+    lid = env.get_object("box_lid")
+    if lid is None or closed_pos_xy is None:
+        return 0.0
+    pos = lid.get_position()
+    return float(np.linalg.norm(np.array(pos[:2], dtype=float) - np.array(closed_pos_xy[:2], dtype=float)))
+
+
+def ensure_lid_open_for_box_tasks(env, closed_pos_xy, min_xy=None, retries=2):
+    """
+    Ensure box lid is sufficiently opened for downstream box tasks.
+    Retries run_open_box when current opening is below threshold.
+    """
+    if min_xy is None:
+        min_xy = float(os.environ.get("LID_OPEN_TARGET_DISPLACEMENT", "0.45"))
+
+    current = lid_open_distance_xy(env, closed_pos_xy)
+    if current >= float(min_xy):
+        print(f"[LidCheck] Open distance {current:.3f}m (>= {float(min_xy):.3f}m)")
+        return True
+
+    print(
+        f"[LidCheck] Open distance {current:.3f}m (< {float(min_xy):.3f}m). "
+        f"Retrying open-box up to {retries} times."
+    )
+    for i in range(max(0, int(retries))):
+        ok = run_open_box(env, task_name=f"Lid corrective open ({i+1}/{retries})")
+        go_home(env)
+        current = lid_open_distance_xy(env, closed_pos_xy)
+        print(f"[LidCheck] After retry {i+1}: {current:.3f}m")
+        if ok and current >= float(min_xy):
+            return True
+    return current >= float(min_xy)
+
+
 def interpolate_path(env, q1, q2, steps=50):
     """Interpolate between two configurations."""
     traj = []
@@ -2053,6 +2088,14 @@ def main():
     for _ in range(10):
         step_and_record(pr, 1)
 
+    lid_closed_ref = None
+    lid_obj = env.get_object("box_lid")
+    if lid_obj is not None:
+        try:
+            lid_closed_ref = list(lid_obj.get_position())
+        except Exception:
+            lid_closed_ref = None
+
     results = []
 
     # ============================================
@@ -2117,6 +2160,12 @@ def main():
         env,
         task_name="Task 4: Open Box Lid"
     )
+    lid_ok = ensure_lid_open_for_box_tasks(
+        env,
+        lid_closed_ref,
+        retries=2 if not success else 1,
+    )
+    success = bool(success or lid_ok)
     results.append(("Task 4: open box lid", success))
     go_home(env)
 

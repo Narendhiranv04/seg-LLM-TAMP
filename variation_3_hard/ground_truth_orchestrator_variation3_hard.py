@@ -108,38 +108,6 @@ def _is_within_region_volume(env, obj, region_name, xy_tol=0.04, z_tol=0.10):
     )
 
 
-def _lid_open_distance_xy(env, closed_pos_xy):
-    lid = env.get_object("box_lid")
-    if lid is None or closed_pos_xy is None:
-        return 0.0
-    pos = lid.get_position()
-    return float(np.linalg.norm(np.array(pos[:2], dtype=float) - np.array(closed_pos_xy[:2], dtype=float)))
-
-
-def _ensure_lid_open_for_box_tasks(env, closed_pos_xy, min_xy=0.18, retries=2):
-    """
-    Ensure box lid is sufficiently opened for repeated mug placements.
-    Retries run_open_box when current opening is below threshold.
-    """
-    current = _lid_open_distance_xy(env, closed_pos_xy)
-    if current >= float(min_xy):
-        print(f"[LidCheck] Open distance {current:.3f}m (>= {min_xy:.3f}m)")
-        return True
-
-    print(
-        f"[LidCheck] Open distance {current:.3f}m (< {min_xy:.3f}m). "
-        f"Retrying open-box up to {retries} times."
-    )
-    for i in range(max(0, int(retries))):
-        ok = base.run_open_box(env, task_name=f"Lid corrective open ({i+1}/{retries})")
-        base.go_home(env)
-        current = _lid_open_distance_xy(env, closed_pos_xy)
-        print(f"[LidCheck] After retry {i+1}: {current:.3f}m")
-        if ok and current >= float(min_xy):
-            return True
-    return current >= float(min_xy)
-
-
 def _discover_unique_objects(env, candidate_names):
     seen = set()
     names = []
@@ -855,7 +823,7 @@ def main():
         "V3_MIN_LID_OPEN_FOR_MUGS",
         os.environ.get("LID_OPEN_TARGET_DISPLACEMENT", "0.45"),
     ))
-    lid_ok = _ensure_lid_open_for_box_tasks(
+    lid_ok = base.ensure_lid_open_for_box_tasks(
         env,
         lid_closed_ref,
         min_xy=min_lid_open_for_mugs,
@@ -913,13 +881,6 @@ def main():
 
     task_idx = 6
     for mug_name in runtime_table_mugs:
-        # Re-check lid opening before each mug insertion.
-        _ensure_lid_open_for_box_tasks(
-            env,
-            lid_closed_ref,
-            min_xy=min_lid_open_for_mugs,
-            retries=1,
-        )
         slot_pose = box_slots.get(mug_name)
         success = _run_table_mug_to_box_with_fallback(
             env, pr, mug_name, task_idx, slot_pose
