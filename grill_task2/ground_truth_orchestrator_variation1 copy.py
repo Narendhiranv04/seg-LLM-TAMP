@@ -1007,7 +1007,7 @@ def run_pick_place(
         cy = 0.5 * (min_y + max_y)
         # Release slightly above support and settle after retreat (no snap).
         release_height = float(os.environ.get("GRILL_PLATE_RELEASE_HEIGHT", "0.025"))
-        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.060"))
+        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.150"))
         # Keep pre-place hover and post-release retrieve hover at the same height.
         pre_place_z_offset = hover_z_offset
         post_release_lift = hover_z_offset
@@ -4065,7 +4065,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         cy = 0.5 * (min_y + max_y)
 
         release_height = float(os.environ.get("GRILL_PLATE_RELEASE_HEIGHT", "0.025"))
-        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.060"))
+        hover_z_offset = float(os.environ.get("GRILL_PLATE_HOVER_Z_OFFSET", "0.150"))
         pre_place_z_offset = hover_z_offset
         place_z = float(max_z + release_height)
         pre_place_z = float(place_z + pre_place_z_offset)
@@ -4246,7 +4246,9 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         if _target_is_grasped(self.env, self.target_obj):
             return False, "plate remained attached after forced release"
 
+        print("[plate-retreat] horizontal clear from release pose.")
         execute_trajectory(self.env, self.pr, self.plate_traj_out_low, steps_per_segment=6)
+        print("[plate-retreat] upward clear to high hover.")
         execute_trajectory(self.env, self.pr, self.plate_traj_up, steps_per_segment=5)
         lift_object_if_submerged(
             self.env,
