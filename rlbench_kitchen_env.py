@@ -381,35 +381,12 @@ class RLBenchKitchenEnv:
         
         current_pose = obj.get_pose()
 
-        is_box_region = region_name in {BOX_INSIDE_FALLBACK_REGION, BOX_STORAGE_REGION}
-        if is_box_region:
-            # In boxes, keep a small padding and bias to free XY to avoid unnecessary planner failures.
-            box_padding = float(os.environ.get("BOX_REGION_SAMPLE_PADDING", "0.015"))
-            if (w_max_x - w_min_x) < 2 * box_padding:
-                box_padding = max(0.0, 0.1 * (w_max_x - w_min_x))
-            if (w_max_y - w_min_y) < 2 * box_padding:
-                box_padding = max(0.0, 0.1 * (w_max_y - w_min_y))
-
-            min_x = w_min_x + box_padding
-            max_x = w_max_x - box_padding
-            min_y = w_min_y + box_padding
-            max_y = w_max_y - box_padding
-            if min_x > max_x:
-                mid_x = 0.5 * (w_min_x + w_max_x)
-                min_x = max_x = mid_x
-            if min_y > max_y:
-                mid_y = 0.5 * (w_min_y + w_max_y)
-                min_y = max_y = mid_y
-
-            grid_n = max(3, int(os.environ.get("BOX_REGION_SAMPLE_GRID", "4")))
+        def sample_clear_xy(min_x, max_x, min_y, max_y, grid_n, occ_pad_xy, occ_pad_z):
             xs = np.linspace(min_x, max_x, grid_n).tolist()
             ys = np.linspace(min_y, max_y, grid_n).tolist()
             candidates = [(float(x), float(y)) for x in xs for y in ys]
 
-            # Gather occupied XY from objects currently inside/near the box region.
             occupied_xy = []
-            occ_pad_xy = float(os.environ.get("BOX_REGION_OCCUPANCY_PAD_XY", "0.03"))
-            occ_pad_z = float(os.environ.get("BOX_REGION_OCCUPANCY_PAD_Z", "0.08"))
             seen_handles = set()
             occupancy_sources = []
 
@@ -468,30 +445,77 @@ class RLBenchKitchenEnv:
 
                 # Shuffle to avoid deterministic tie bias in symmetric scenes.
                 np.random.shuffle(candidates)
-                best_xy = max(candidates, key=_clearance_score)
-                sample_x, sample_y = best_xy
-            else:
-                sample_x = float(np.random.uniform(min_x, max_x))
-                sample_y = float(np.random.uniform(min_y, max_y))
+                return max(candidates, key=_clearance_score)
+
+            return (
+                float(np.random.uniform(min_x, max_x)),
+                float(np.random.uniform(min_y, max_y)),
+            )
+
+        is_box_region = region_name in {BOX_INSIDE_FALLBACK_REGION, BOX_STORAGE_REGION}
+        if is_box_region:
+            # In boxes, keep a small padding and bias to free XY to avoid unnecessary planner failures.
+            box_padding = float(os.environ.get("BOX_REGION_SAMPLE_PADDING", "0.015"))
+            if (w_max_x - w_min_x) < 2 * box_padding:
+                box_padding = max(0.0, 0.1 * (w_max_x - w_min_x))
+            if (w_max_y - w_min_y) < 2 * box_padding:
+                box_padding = max(0.0, 0.1 * (w_max_y - w_min_y))
+
+            min_x = w_min_x + box_padding
+            max_x = w_max_x - box_padding
+            min_y = w_min_y + box_padding
+            max_y = w_max_y - box_padding
+            if min_x > max_x:
+                mid_x = 0.5 * (w_min_x + w_max_x)
+                min_x = max_x = mid_x
+            if min_y > max_y:
+                mid_y = 0.5 * (w_min_y + w_max_y)
+                min_y = max_y = mid_y
+
+            sample_x, sample_y = sample_clear_xy(
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                max(3, int(os.environ.get("BOX_REGION_SAMPLE_GRID", "4"))),
+                float(os.environ.get("BOX_REGION_OCCUPANCY_PAD_XY", "0.03")),
+                float(os.environ.get("BOX_REGION_OCCUPANCY_PAD_Z", "0.08")),
+            )
 
             sample_z = w_min_z + float(os.environ.get("BOX_REGION_SAMPLE_Z_OFFSET", "0.012"))
+        elif region_name == 'placement_boundary':
+            placement_padding = float(os.environ.get("PLACEMENT_BOUNDARY_SAMPLE_PADDING", str(padding)))
+            if (w_max_x - w_min_x) < 2 * placement_padding:
+                placement_padding = 0
+            if (w_max_y - w_min_y) < 2 * placement_padding:
+                placement_padding = 0
+            min_x = w_min_x + placement_padding
+            max_x = w_max_x - placement_padding
+            min_y = w_min_y + placement_padding
+            max_y = w_max_y - placement_padding
+            sample_x, sample_y = sample_clear_xy(
+                min_x,
+                max_x,
+                min_y,
+                max_y,
+                max(3, int(os.environ.get("PLACEMENT_BOUNDARY_SAMPLE_GRID", "4"))),
+                float(os.environ.get("PLACEMENT_BOUNDARY_OCCUPANCY_PAD_XY", "0.04")),
+                float(os.environ.get("PLACEMENT_BOUNDARY_OCCUPANCY_PAD_Z", "0.12")),
+            )
+
+            # For placement boundary, we want to be on the table surface.
+            table = self.regions.get('table')
+            if table:
+                _, _, _, _, _, t_max_z = self._get_world_bounding_box(table)
+                sample_z = t_max_z + 0.005
+            else:
+                sample_z = w_min_z + 0.005
         else:
             sample_x = np.random.uniform(w_min_x + padding, w_max_x - padding)
             sample_y = np.random.uniform(w_min_y + padding, w_max_y - padding)
 
-            # Adjust Z based on region
-            if region_name == 'placement_boundary':
-                # For placement boundary, we want to be on the table surface.
-                # Check table height
-                table = self.regions.get('table')
-                if table:
-                    _, _, _, _, _, t_max_z = self._get_world_bounding_box(table)
-                    sample_z = t_max_z + 0.005
-                else:
-                    sample_z = w_min_z + 0.005
-            else:
-                # Default (Table)
-                sample_z = w_max_z + 0.005
+            # Default (Table)
+            sample_z = w_max_z + 0.005
             
         # Use the sampled x,y and guessed z
         new_pose = list(current_pose)
