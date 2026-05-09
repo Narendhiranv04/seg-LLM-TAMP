@@ -600,6 +600,14 @@ def main():
     for _ in range(10):
         base.step_and_record(pr, 1)
 
+    lid_closed_ref = None
+    lid_obj = env.get_object("box_lid")
+    if lid_obj is not None:
+        try:
+            lid_closed_ref = list(lid_obj.get_position())
+        except Exception:
+            lid_closed_ref = None
+
     picked = _classify_variation_objects(env)
     mug_on_box = picked["mug_on_box"]
     mug_in_cupboard = picked["mug_in_cupboard"]
@@ -654,6 +662,12 @@ def main():
         env,
         task_name="Task 3: Open Box Lid",
     )
+    lid_ok = base.ensure_lid_open_for_box_tasks(
+        env,
+        lid_closed_ref,
+        retries=2 if not success else 1,
+    )
+    success = bool(success or lid_ok)
     results.append(("Task 3: open box lid", success))
     base.go_home(env)
 
