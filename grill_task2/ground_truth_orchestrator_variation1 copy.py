@@ -112,6 +112,15 @@ OPEN_HANDLE_USE_FALLBACK_ORIENTATIONS = os.environ.get(
     "GRILL_OPEN_HANDLE_USE_FALLBACK_ORIENTATIONS", "False"
 ) == "True"
 OPEN_REPLAY_DIR = os.path.join(THIS_DIR, "precomputed_paths")
+PLATE_REPLAY_DIR = os.path.join(THIS_DIR, "precomputed_paths")
+PLATE_PLACE_SEGMENTS = ("motion_to_pre", "traj_down", "traj_in", "traj_out_low", "traj_up")
+PLATE_FULL_SEGMENTS = (
+    "motion_to_pick_hover",
+    "pick_approach",
+    "pick_retreat",
+    "high_retreat",
+    "place_to_home",
+)
 ACTIVE_LID_JOINT_HANDLE = None
 ACTIVE_HANDLE_SHAPE_HANDLE = None
 HANDLE_ANCHOR_PARENT_HANDLE = None
@@ -1014,8 +1023,8 @@ def run_pick_place(
         place_z = float(max_z + release_height)
         pre_place_z = float(place_z + pre_place_z_offset)
 
-        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.10"))
-        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "0.00"))
+        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.05"))
+        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "-0.05"))
         place_pos = [cx + place_x_offset, cy, place_z]
         pre_place_low_pos = [place_pos[0] + hover_dx, cy, place_z]
         pre_place_high_pos = [place_pos[0] + hover_dx, cy, pre_place_z]
@@ -2872,6 +2881,89 @@ def _load_open_replay_waypoints(variant_id, current_joint, target_joint):
     return replay
 
 
+def _default_plate_replay_path(variant_id=None):
+    # Plate and plate_boundary geometry is shared across G1/G2/G3.
+    return os.path.join(PLATE_REPLAY_DIR, "grill_plate_boundary.json")
+
+
+def _plate_replay_path(variant_id=None):
+    explicit = os.environ.get("GRILL_PLATE_REPLAY_PATH", "").strip()
+    if explicit:
+        return explicit
+    return _default_plate_replay_path(variant_id)
+
+
+def _coerce_trajectory(name, value):
+    if value is None:
+        return None
+    try:
+        traj = [list(map(float, q)) for q in value]
+    except Exception:
+        print(f"[plate][replay] invalid trajectory segment '{name}'")
+        return None
+    if not traj:
+        print(f"[plate][replay] empty trajectory segment '{name}'")
+        return None
+    return traj
+
+
+def _load_plate_replay_segments(variant_id=None):
+    path = _plate_replay_path(variant_id)
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"[plate][replay] failed to read {path}: {exc}")
+        return None
+
+    segments = data.get("segments", {})
+    loaded = {}
+    for name in PLATE_PLACE_SEGMENTS:
+        traj = _coerce_trajectory(name, segments.get(name))
+        if traj is None:
+            return None
+        loaded[name] = traj
+    for name in PLATE_FULL_SEGMENTS:
+        traj = _coerce_trajectory(name, segments.get(name))
+        if traj is not None:
+            loaded[name] = traj
+
+    print(
+        f"[plate][replay] loaded plate placement trajectory from {path}: "
+        f"motion_to_pre={len(loaded['motion_to_pre'])}, "
+        f"down={len(loaded['traj_down'])}, in={len(loaded['traj_in'])}, "
+        f"out={len(loaded['traj_out_low'])}, up={len(loaded['traj_up'])}, "
+        f"full_home_to_home={all(k in loaded for k in PLATE_FULL_SEGMENTS)}"
+    )
+    return loaded
+
+
+def _record_plate_replay_segments(variant_id, segments, metadata=None):
+    path = os.environ.get("GRILL_PLATE_RECORD_PATH", "").strip()
+    if not path:
+        return
+    try:
+        record = {
+            "variant_id": str(variant_id),
+            "scene_path": SCENE_PATH,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "metadata": metadata or {},
+            "segments": {
+                name: [list(map(float, q)) for q in traj]
+                for name, traj in segments.items()
+            },
+        }
+        out_path = os.path.abspath(path)
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w") as f:
+            json.dump(record, f, indent=2, default=str)
+        print(f"[plate][record] wrote plate placement trajectory to {out_path}")
+    except Exception as exc:
+        print(f"[plate][record] failed to write trajectory: {exc}")
+
+
 def _force_lid_closed(env, pr, steps=80):
     """Hard-hold lid at closed angle for a short period."""
     h = _resolve_lid_joint_handle(env)
@@ -3882,6 +3974,12 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         self.q_place_start = None
         self.standard_place_down = None
         self.standard_place_up = None
+        self.plate_replay = _load_plate_replay_segments(_scene_variant_id()) if self.is_plate else None
+        self.plate_record_segments = {}
+        self.plate_record_metadata = {
+            "target_region": self.target_region,
+            "plate_pose_before": self.pose_before,
+        }
         self.plate_motion_to_pre = None
         self.plate_traj_down = None
         self.plate_traj_in = None
@@ -3941,8 +4039,23 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         step(self.pr, 10)
         return True
 
+    def _plan_or_interpolate(self, q_start, q_target, label, min_steps=80):
+        motion = self.env.compute_motion_plan(q_start, q_target)
+        if motion:
+            print(f"[{label}] Planned motion with {len(motion)} waypoints.")
+            return motion
+        print(f"[{label}] Motion planner failed, using direct interpolation.")
+        q1 = np.array(q_start, dtype=float)
+        q2 = np.array(q_target, dtype=float)
+        return [((1.0 - t) * q1 + t * q2).tolist() for t in np.linspace(0.0, 1.0, max(2, int(min_steps)))]
+
     def _lift_after_plate_pick(self):
         if not self.is_plate:
+            return True
+        if self.plate_replay is not None and "high_retreat" in self.plate_replay:
+            print("[plate-pick] Replaying saved high retreat.")
+            execute_trajectory(self.env, self.pr, self.plate_replay["high_retreat"], steps_per_segment=1)
+            step(self.pr, 4)
             return True
         try:
             q_current = list(self.env.get_robot_conf())
@@ -3973,6 +4086,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
 
         if path:
             traj = path._path_points.reshape(-1, 7).tolist()
+            self.plate_record_segments["high_retreat"] = traj
             print(
                 "[plate-pick] High retreat before home: "
                 f"tip_z {float(tip_pos[2]):.3f} -> {target_pos[2]:.3f}"
@@ -4000,7 +4114,20 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
                 "[plate-pick] High retreat before home via IK: "
                 f"tip_z {float(tip_pos[2]):.3f} -> {target_pos[2]:.3f}"
             )
-            _move_to_conf_fast(self.env, self.pr, q_target, label="plate-pick->high_retreat", steps=70)
+            try:
+                traj = self.env._interpolate_joint_path(q_current, q_target, steps=70, check_collisions=True)
+            except Exception:
+                traj = None
+            if not traj:
+                try:
+                    traj = self.env._interpolate_joint_path(q_current, q_target, steps=70, check_collisions=False)
+                except Exception:
+                    traj = None
+            if traj:
+                self.plate_record_segments["high_retreat"] = traj
+                execute_trajectory(self.env, self.pr, traj, steps_per_segment=1)
+            else:
+                _move_to_conf_fast(self.env, self.pr, q_target, label="plate-pick->high_retreat", steps=70)
             step(self.pr, 4)
             return True
 
@@ -4010,6 +4137,11 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
     def _move_to_pick(self):
         if not self._at_home():
             self._move_back_home("pre-pick->home")
+        if self.is_plate and self.plate_replay is not None and "motion_to_pick_hover" in self.plate_replay:
+            print("[plate-replay] Replaying home->pick_hover.")
+            execute_trajectory(self.env, self.pr, self.plate_replay["motion_to_pick_hover"], steps_per_segment=4)
+            step(self.pr, 10)
+            return True, "move"
         try:
             self.q_hover, self.hover_quat = self.env.compute_hover_config(
                 self.target_obj,
@@ -4019,23 +4151,36 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         except Exception as e:
             return False, f"hover failed: {e}"
 
-        _move_to_conf(self.env, self.pr, self.q_hover, label="move->pick_hover")
+        motion = self._plan_or_interpolate(self.env.get_robot_conf(), self.q_hover, label="move->pick_hover")
+        if self.is_plate:
+            self.plate_record_segments["motion_to_pick_hover"] = motion
+        execute_trajectory(self.env, self.pr, motion, steps_per_segment=4)
         step(self.pr, 10)
         return True, "move"
 
     def _pick(self):
-        try:
-            _grasp, _q1, _q2, traj_tuple = self.env.compute_pick_trajectory(
-                self.target_obj,
-                list(self.pose_before),
-                preferred_orientation=self.hover_quat,
-                is_plate=self.is_plate,
-            )
-        except Exception as e:
-            return False, f"pick trajectory failed: {e}"
+        if self.is_plate and self.plate_replay is not None and all(
+            key in self.plate_replay for key in ("pick_approach", "pick_retreat")
+        ):
+            print("[plate-replay] Replaying pick approach/retreat.")
+            approach_traj = self.plate_replay["pick_approach"]
+            retreat_traj = self.plate_replay["pick_retreat"]
+        else:
+            try:
+                _grasp, _q1, _q2, traj_tuple = self.env.compute_pick_trajectory(
+                    self.target_obj,
+                    list(self.pose_before),
+                    preferred_orientation=self.hover_quat,
+                    is_plate=self.is_plate,
+                )
+            except Exception as e:
+                return False, f"pick trajectory failed: {e}"
 
-        self.pick_segments = traj_tuple
-        approach_traj, retreat_traj = traj_tuple
+            self.pick_segments = traj_tuple
+            approach_traj, retreat_traj = traj_tuple
+            if self.is_plate:
+                self.plate_record_segments["pick_approach"] = approach_traj
+                self.plate_record_segments["pick_retreat"] = retreat_traj
 
         current_q = self.env.get_robot_conf()
         if approach_traj and not np.allclose(current_q, approach_traj[0], atol=0.05):
@@ -4056,6 +4201,22 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         return True, "pick"
 
     def _prepare_plate_place_path(self):
+        replay = self.plate_replay
+        if replay is not None:
+            self.plate_motion_to_pre = replay["motion_to_pre"]
+            self.plate_traj_down = replay["traj_down"]
+            self.plate_traj_in = replay["traj_in"]
+            self.plate_traj_out_low = replay["traj_out_low"]
+            self.plate_traj_up = replay["traj_up"]
+            self.plate_record_segments.update({
+                "motion_to_pre": self.plate_motion_to_pre,
+                "traj_down": self.plate_traj_down,
+                "traj_in": self.plate_traj_in,
+                "traj_out_low": self.plate_traj_out_low,
+                "traj_up": self.plate_traj_up,
+            })
+            return True, "plate replay loaded"
+
         region = _region_object(self.env, self.target_region)
         if region is None:
             return False, f"region '{self.target_region}' not found for plate placement"
@@ -4070,8 +4231,8 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         place_z = float(max_z + release_height)
         pre_place_z = float(place_z + pre_place_z_offset)
 
-        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.10"))
-        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "0.00"))
+        hover_dx = float(os.environ.get("GRILL_PLATE_HOVER_DX", "-0.05"))
+        place_x_offset = float(os.environ.get("GRILL_PLATE_PLACE_X_OFFSET", "-0.05"))
         place_pos = [cx + place_x_offset, cy, place_z]
         pre_place_low_pos = [place_pos[0] + hover_dx, cy, place_z]
         pre_place_high_pos = [place_pos[0] + hover_dx, cy, pre_place_z]
@@ -4151,6 +4312,22 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             self.plate_traj_out_low,
             self.plate_traj_up,
         ) = chosen
+        self.plate_record_segments.update({
+            "motion_to_pre": self.plate_motion_to_pre,
+            "traj_down": self.plate_traj_down,
+            "traj_in": self.plate_traj_in,
+            "traj_out_low": self.plate_traj_out_low,
+            "traj_up": self.plate_traj_up,
+        })
+        self.plate_record_metadata.update({
+            "place_pos": place_pos,
+            "pre_place_low_pos": pre_place_low_pos,
+            "pre_place_high_pos": pre_place_high_pos,
+            "hover_dx": hover_dx,
+            "place_x_offset": place_x_offset,
+            "release_height": release_height,
+            "hover_z_offset": hover_z_offset,
+        })
         return True, "plate place prepared"
 
     def _move_to_place(self):
@@ -4211,7 +4388,24 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         print(f"Task '{self.task_name}' complete!")
         return True, "place"
 
+    def _fix_plate_orientation_before_place(self):
+        # Keep the plate flat in scene coordinates before the vertical descent.
+        desired_quat = [0.0, -0.7071067811865475, 0.0, 0.7071067811865476]
+        try:
+            pose = list(self.target_obj.get_pose())
+            pose[3:7] = desired_quat
+            self.target_obj.set_dynamic(False)
+            self.target_obj.set_pose(pose)
+            step(self.pr, 4)
+            print(
+                "[plate-place] Fixed plate world orientation before path_down: "
+                f"quat={np.round(np.array(desired_quat, dtype=float), 4).tolist()}"
+            )
+        except Exception as exc:
+            print(f"[plate-place] WARNING: could not fix plate orientation before path_down: {exc}")
+
     def _place_plate(self):
+        self._fix_plate_orientation_before_place()
         execute_trajectory(self.env, self.pr, self.plate_traj_down, steps_per_segment=5)
         execute_trajectory(self.env, self.pr, self.plate_traj_in, steps_per_segment=6)
 
@@ -4278,7 +4472,38 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             step(self.pr, 8)
 
         step(self.pr, 10)
-        self._move_back_home("place->home")
+        home_q = self._home_conf()
+        if self.plate_replay is not None and "place_to_home" in self.plate_replay:
+            print("[plate-replay] Replaying place->home.")
+            execute_trajectory(self.env, self.pr, self.plate_replay["place_to_home"], steps_per_segment=4)
+            try:
+                self.env.set_robot_conf(home_q)
+            except Exception:
+                pass
+            step(self.pr, 10)
+        else:
+            if self._at_home():
+                print("[place->home] Already at home.")
+                place_to_home = [self.env.get_robot_conf()]
+            else:
+                place_to_home = self._plan_or_interpolate(
+                    self.env.get_robot_conf(),
+                    home_q,
+                    label="place->home",
+                )
+                execute_trajectory(self.env, self.pr, place_to_home, steps_per_segment=4)
+                try:
+                    self.env.set_robot_conf(home_q)
+                except Exception:
+                    pass
+                step(self.pr, 10)
+            self.plate_record_segments["place_to_home"] = place_to_home
+        self.plate_record_metadata["plate_pose_after"] = list(self.target_obj.get_pose())
+        _record_plate_replay_segments(
+            _scene_variant_id(),
+            self.plate_record_segments,
+            metadata=self.plate_record_metadata,
+        )
         return self._validate_transfer_complete()
 
     def _place_standard(self):

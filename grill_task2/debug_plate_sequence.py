@@ -111,6 +111,8 @@ def _run_child(args):
         "target_region": "plate_boundary",
         "region": None,
         "target_pose": None,
+        "trajectory_record_path": os.environ.get("GRILL_PLATE_RECORD_PATH", "").strip() or None,
+        "trajectory_replay_path": os.environ.get("GRILL_PLATE_REPLAY_PATH", "").strip() or None,
         "plate_before": None,
         "plate_after": None,
     }
@@ -164,19 +166,21 @@ def _child_main(args):
 
 
 def _run_trial(args, output_dir: Path, trial_index: int):
-    variant_dir = output_dir / "trials" / args.variant
+    variant = args.variant
+    variant_dir = output_dir / "trials" / variant
     variant_dir.mkdir(parents=True, exist_ok=True)
 
-    report_path = variant_dir / f"{args.variant}_plate_trial_{trial_index:03d}.json"
-    stdout_path = variant_dir / f"{args.variant}_plate_trial_{trial_index:03d}.stdout.log"
-    stderr_path = variant_dir / f"{args.variant}_plate_trial_{trial_index:03d}.stderr.log"
+    report_path = variant_dir / f"{variant}_plate_trial_{trial_index:03d}.json"
+    trajectory_path = variant_dir / f"{variant}_plate_trial_{trial_index:03d}.trajectory.json"
+    stdout_path = variant_dir / f"{variant}_plate_trial_{trial_index:03d}.stdout.log"
+    stderr_path = variant_dir / f"{variant}_plate_trial_{trial_index:03d}.stderr.log"
 
     cmd = [
         sys.executable,
         str(Path(__file__).resolve()),
         "--_child",
         "--variant",
-        args.variant,
+        variant,
         "--trial-index",
         str(trial_index),
         "--report",
@@ -187,8 +191,15 @@ def _run_trial(args, output_dir: Path, trial_index: int):
 
     env = os.environ.copy()
     env["GRILL_ALLOW_SCENE_OVERRIDE"] = "True"
-    env["GRILL_SCENE_FILE_OVERRIDE"] = str(SCENE_BY_VARIANT[args.variant])
+    env["GRILL_SCENE_FILE_OVERRIDE"] = str(SCENE_BY_VARIANT[variant])
     env["HEADLESS"] = "False" if args.gui else "True"
+    env["COPPELIASIM_HEADLESS"] = "0" if args.gui else "1"
+    env["PYTHONUNBUFFERED"] = "1"
+    env["GRILL_PLATE_RECORD_PATH"] = str(trajectory_path)
+    if args.replay_path:
+        env["GRILL_PLATE_REPLAY_PATH"] = str(args.replay_path)
+    elif args.replay_dir:
+        env["GRILL_PLATE_REPLAY_PATH"] = str(args.replay_dir / f"grill_plate_{variant}.json")
 
     result = subprocess.run(
         cmd,
@@ -206,7 +217,7 @@ def _run_trial(args, output_dir: Path, trial_index: int):
         report = json.loads(report_path.read_text())
     else:
         report = {
-            "variant_id": args.variant,
+            "variant_id": variant,
             "trial_index": trial_index,
             "success": False,
             "failure_reason": f"child_returncode:{result.returncode}",
@@ -214,6 +225,7 @@ def _run_trial(args, output_dir: Path, trial_index: int):
         report_path.write_text(json.dumps(report, indent=2))
 
     report["subprocess_returncode"] = int(result.returncode)
+    report["trajectory_record_path"] = str(trajectory_path)
     report["stdout_log_path"] = str(stdout_path)
     report["stderr_log_path"] = str(stderr_path)
     report_path.write_text(json.dumps(report, indent=2, default=str))
@@ -225,12 +237,43 @@ def _default_output_dir():
     return ROOT_DIR / "outputs" / "plate_sequence" / stamp
 
 
+def _parse_variants(args):
+    raw = args.variants.strip()
+    if raw:
+        variants = [item.strip().upper() for item in raw.split(",") if item.strip()]
+    else:
+        variants = [args.variant]
+
+    unknown = [variant for variant in variants if variant not in SCENE_BY_VARIANT]
+    if unknown:
+        valid = ", ".join(sorted(SCENE_BY_VARIANT))
+        raise ValueError(f"Unknown variant(s): {', '.join(unknown)}. Valid variants: {valid}")
+    return variants
+
+
 def main():
     parser = argparse.ArgumentParser(description="Debug only grill plate pick/place.")
     parser.add_argument("--variant", choices=sorted(SCENE_BY_VARIANT), default="G1")
+    parser.add_argument(
+        "--variants",
+        default="",
+        help="Comma-separated variants to run, for example G1,G2,G3. Overrides --variant.",
+    )
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--trial-index", type=int, default=1)
     parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument(
+        "--replay-path",
+        type=Path,
+        default=None,
+        help="Replay one saved plate trajectory JSON for every trial.",
+    )
+    parser.add_argument(
+        "--replay-dir",
+        type=Path,
+        default=None,
+        help="Replay per-variant grill_plate_G*.json files from this directory.",
+    )
     parser.add_argument("--gui", action="store_true")
     parser.add_argument("--report", type=str, default="")
     parser.add_argument("--_child", action="store_true", help=argparse.SUPPRESS)
@@ -243,17 +286,30 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     records = []
-    for idx in range(1, max(1, args.trials) + 1):
-        print(f"[plate-debug] {args.variant} trial {idx}/{args.trials}")
-        records.append(_run_trial(args, output_dir, idx))
+    variants = _parse_variants(args)
+    for variant in variants:
+        args.variant = variant
+        for idx in range(1, max(1, args.trials) + 1):
+            print(f"[plate-debug] {variant} trial {idx}/{args.trials}")
+            records.append(_run_trial(args, output_dir, idx))
 
     success_count = sum(1 for record in records if record.get("success"))
+    by_variant = {}
+    for variant in variants:
+        variant_records = [record for record in records if record.get("variant_id") == variant]
+        variant_success_count = sum(1 for record in variant_records if record.get("success"))
+        by_variant[variant] = {
+            "trials": len(variant_records),
+            "success_count": variant_success_count,
+            "success_rate": float(variant_success_count / len(variant_records)) if variant_records else 0.0,
+        }
     summary = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "variant_id": args.variant,
+        "variants": variants,
         "trials": len(records),
         "success_count": success_count,
         "success_rate": float(success_count / len(records)) if records else 0.0,
+        "by_variant": by_variant,
         "records": records,
     }
     summary_path = output_dir / "plate_sequence_summary.json"
