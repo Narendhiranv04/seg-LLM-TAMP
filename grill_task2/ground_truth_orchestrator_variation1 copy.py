@@ -269,6 +269,12 @@ def _region_object(env, region_name):
     return env.get_object(region_name)
 
 
+def _validation_region_name(env, region_name):
+    if region_name == "plate-top" and _region_object(env, "plate") is not None:
+        return "plate"
+    return region_name
+
+
 def _is_in_region(env, obj, region_name, tol_xy=0.02, tol_z=0.05):
     region = _region_object(env, region_name)
     if region is None or obj is None:
@@ -280,6 +286,106 @@ def _is_in_region(env, obj, region_name, tol_xy=0.02, tol_z=0.05):
         and (min_y - tol_xy) <= y <= (max_y + tol_xy)
         and (min_z - tol_z) <= z <= (max_z + tol_z)
     )
+
+
+def _round_list(values, digits=4, max_items=None):
+    try:
+        items = list(values)
+    except Exception:
+        return None
+    if max_items is not None:
+        items = items[:max_items]
+    rounded = []
+    for value in items:
+        try:
+            rounded.append(round(float(value), digits))
+        except Exception:
+            rounded.append(value)
+    return rounded
+
+
+def _safe_gripper_joint_positions(env):
+    for attr in ("get_joint_positions", "get_joint_position"):
+        try:
+            fn = getattr(env.gripper, attr)
+        except Exception:
+            continue
+        try:
+            value = fn()
+            if isinstance(value, (list, tuple, np.ndarray)):
+                return _round_list(value, digits=4)
+            return round(float(value), 4)
+        except Exception:
+            continue
+    return None
+
+
+def _plate_debug_state(env, target_obj, label, region_name=None):
+    if target_obj is None:
+        print(f"[PlateDebug] {label}: target_obj=None")
+        return
+    try:
+        plate_pose = list(target_obj.get_pose())
+        plate_pos = plate_pose[:3]
+        plate_quat = plate_pose[3:7]
+    except Exception:
+        plate_pose = None
+        plate_pos = None
+        plate_quat = None
+    try:
+        tip_pose = list(env.robot.get_tip().get_pose())
+        tip_pos = tip_pose[:3]
+        tip_quat = tip_pose[3:7]
+    except Exception:
+        tip_pos = None
+        tip_quat = None
+    if plate_pos is not None and tip_pos is not None:
+        delta = np.array(tip_pos, dtype=float) - np.array(plate_pos, dtype=float)
+        tip_obj_dist = float(np.linalg.norm(delta))
+        tip_obj_xy = float(np.linalg.norm(delta[:2]))
+        tip_obj_dz = float(delta[2])
+    else:
+        tip_obj_dist = float("nan")
+        tip_obj_xy = float("nan")
+        tip_obj_dz = float("nan")
+    try:
+        robot_q = _round_list(env.get_robot_conf(), digits=4, max_items=7)
+    except Exception:
+        robot_q = None
+    try:
+        grasped_names = [str(o.get_name()) for o in env.gripper.get_grasped_objects()]
+    except Exception:
+        grasped_names = []
+    print(
+        f"[PlateDebug] {label}: "
+        f"plate_pos={_round_list(plate_pos, digits=4)} "
+        f"plate_quat={_round_list(plate_quat, digits=4)} "
+        f"tip_pos={_round_list(tip_pos, digits=4)} "
+        f"tip_quat={_round_list(tip_quat, digits=4)} "
+        f"tip_obj_dist={tip_obj_dist:.4f} "
+        f"tip_obj_xy={tip_obj_xy:.4f} "
+        f"tip_obj_dz={tip_obj_dz:.4f} "
+        f"detected={_gripper_detects(env, target_obj)} "
+        f"grasped={_target_is_grasped(env, target_obj)} "
+        f"grasped_objects={grasped_names} "
+        f"gripper_joints={_safe_gripper_joint_positions(env)} "
+        f"robot_q={robot_q}"
+    )
+    if region_name:
+        try:
+            region = _region_object(env, region_name)
+            region_bounds = _round_list(_get_world_bounds(env, region), digits=4)
+        except Exception:
+            region_bounds = None
+        try:
+            plate_bounds = _round_list(_get_world_bounds(env, target_obj), digits=4)
+        except Exception:
+            plate_bounds = None
+        print(
+            f"[PlateDebug] {label}: "
+            f"region={region_name} region_bounds={region_bounds} "
+            f"plate_world_bounds={plate_bounds}"
+        )
 
 
 def _scene_shape_names():
@@ -647,7 +753,10 @@ def grasp_object(env, pr, target_obj, is_plate=False):
             f"bbox_h={obj_height:.4f} span={obj_span:.4f} "
             f"close_velocity={close_velocity:.3f} close_steps={close_steps}"
         )
+        _plate_debug_state(env, target_obj, "before-initial-close")
     _close_gripper_fully(env, pr, velocity=close_velocity, max_steps=close_steps)
+    if is_plate:
+        _plate_debug_state(env, target_obj, "after-initial-close")
 
     grasped = False
     attempts = 5 if is_flat_pick else 3
@@ -673,6 +782,7 @@ def grasp_object(env, pr, target_obj, is_plate=False):
                 f"detected_before={detected_before} "
                 f"tip_obj_dist={tip_obj_dist:.4f}"
             )
+            _plate_debug_state(env, target_obj, f"attempt-{attempt + 1}-before-grasp")
         try:
             env.gripper.grasp(target_obj)
         except Exception:
@@ -692,6 +802,7 @@ def grasp_object(env, pr, target_obj, is_plate=False):
                 f"grasped={grasped} "
                 f"grasped_objects={grasped_names}"
             )
+            _plate_debug_state(env, target_obj, f"attempt-{attempt + 1}-after-grasp")
         if grasped:
             break
 
@@ -709,6 +820,8 @@ def grasp_object(env, pr, target_obj, is_plate=False):
                         f"retrying close velocity={retry_velocity:.3f} steps={retry_steps}"
                     )
                 _close_gripper_fully(env, pr, velocity=retry_velocity, max_steps=retry_steps)
+                if is_plate:
+                    _plate_debug_state(env, target_obj, f"attempt-{attempt + 1}-after-retry-close")
 
     if not is_plate and not grasped:
         try:
@@ -1167,11 +1280,15 @@ def run_pick_place(
 
         pos_after = np.array(target_obj.get_position(), dtype=float)
         disp = float(np.linalg.norm(pos_after - pos_before))
-        in_region = _is_in_region(env, target_obj, target_region, tol_xy=0.04, tol_z=0.06)
+        validation_region = _validation_region_name(env, target_region)
+        in_region = _is_in_region(env, target_obj, validation_region, tol_xy=0.04, tol_z=0.06)
         if (disp < 0.03) or (not in_region):
-            print(f"ERROR: validation failed for '{obj_name}' (disp={disp:.3f}, in_region={in_region})")
+            print(
+                f"ERROR: validation failed for '{obj_name}' "
+                f"(disp={disp:.3f}, in_region={in_region}, validation_region={validation_region})"
+            )
             return False
-        print(f"✓ Validation passed: moved {disp:.3f}m and inside '{target_region}'")
+        print(f"✓ Validation passed: moved {disp:.3f}m and inside '{validation_region}'")
         return True
 
     try:
@@ -1202,12 +1319,16 @@ def run_pick_place(
 
     pos_after = np.array(target_obj.get_position(), dtype=float)
     disp = float(np.linalg.norm(pos_after - pos_before))
-    in_region = _is_in_region(env, target_obj, target_region, tol_xy=0.04, tol_z=0.08)
+    validation_region = _validation_region_name(env, target_region)
+    in_region = _is_in_region(env, target_obj, validation_region, tol_xy=0.04, tol_z=0.08)
     if (disp < 0.03) or (not in_region):
-        print(f"ERROR: validation failed for '{obj_name}' (disp={disp:.3f}, in_region={in_region})")
+        print(
+            f"ERROR: validation failed for '{obj_name}' "
+            f"(disp={disp:.3f}, in_region={in_region}, validation_region={validation_region})"
+        )
         return False
 
-    print(f"✓ Validation passed: moved {disp:.3f}m and inside '{target_region}'")
+    print(f"✓ Validation passed: moved {disp:.3f}m and inside '{validation_region}'")
     return True
 
 
@@ -2937,6 +3058,13 @@ def _load_plate_replay_segments(variant_id=None):
         f"out={len(loaded['traj_out_low'])}, up={len(loaded['traj_up'])}, "
         f"full_home_to_home={all(k in loaded for k in PLATE_FULL_SEGMENTS)}"
     )
+    print(
+        "[plate][replay] source: "
+        f"recorded_variant={data.get('variant_id')} "
+        f"recorded_scene={data.get('scene_path')} "
+        f"created_at={data.get('created_at')} "
+        f"metadata={data.get('metadata', {})}"
+    )
     return loaded
 
 
@@ -3967,6 +4095,8 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         self.pose_before = list(self.target_obj.get_pose())
         self.pos_before = np.array(self.target_obj.get_position(), dtype=float)
         self.target_obj.set_dynamic(False)
+        if self.is_plate:
+            _plate_debug_state(self.env, self.target_obj, "prepare-start", region_name=self.target_region)
 
         self.hover_quat = None
         self.pick_segments = None
@@ -4138,9 +4268,17 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         if not self._at_home():
             self._move_back_home("pre-pick->home")
         if self.is_plate and self.plate_replay is not None and "motion_to_pick_hover" in self.plate_replay:
+            try:
+                self.env.gripper.release()
+            except Exception:
+                pass
+            _open_gripper_fully(self.env, self.pr, velocity=0.35, max_steps=140)
+            _plate_debug_state(self.env, self.target_obj, "after-pre-replay-gripper-open", region_name=self.target_region)
             print("[plate-replay] Replaying home->pick_hover.")
+            _plate_debug_state(self.env, self.target_obj, "before-home-to-pick-hover-replay", region_name=self.target_region)
             execute_trajectory(self.env, self.pr, self.plate_replay["motion_to_pick_hover"], steps_per_segment=4)
             step(self.pr, 10)
+            _plate_debug_state(self.env, self.target_obj, "after-home-to-pick-hover-replay", region_name=self.target_region)
             return True, "move"
         try:
             self.q_hover, self.hover_quat = self.env.compute_hover_config(
@@ -4184,25 +4322,42 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
 
         current_q = self.env.get_robot_conf()
         if approach_traj and not np.allclose(current_q, approach_traj[0], atol=0.05):
+            if self.is_plate:
+                _plate_debug_state(self.env, self.target_obj, "before-align-pick-start")
             _move_to_conf(self.env, self.pr, approach_traj[0], label="align_pick_start")
+            if self.is_plate:
+                _plate_debug_state(self.env, self.target_obj, "after-align-pick-start")
 
+        if self.is_plate:
+            _plate_debug_state(self.env, self.target_obj, "before-pick-approach-replay")
         execute_trajectory(self.env, self.pr, approach_traj, steps_per_segment=8)
+        if self.is_plate:
+            _plate_debug_state(self.env, self.target_obj, "after-pick-approach-before-grasp")
         print(f"Grasping {self.obj_name}...")
         grasped = grasp_object(self.env, self.pr, self.target_obj, is_plate=self.is_plate)
         if not grasped:
             return False, f"failed to attach '{self.obj_name}' to gripper"
+        if self.is_plate:
+            _plate_debug_state(self.env, self.target_obj, "after-successful-grasp-before-retreat")
         execute_trajectory(self.env, self.pr, retreat_traj, steps_per_segment=8)
         step(self.pr, 8)
+        if self.is_plate:
+            _plate_debug_state(self.env, self.target_obj, "after-pick-retreat")
         self._lift_after_plate_pick()
+        if self.is_plate:
+            _plate_debug_state(self.env, self.target_obj, "after-high-retreat")
         if self.is_plate and os.environ.get("GRILL_PLATE_SKIP_PICK_HOME", "True") == "True":
             print("[plate-pick] Skipping pick->home; carrying directly toward placement.")
         else:
             self._move_back_home("pick->home")
+            if self.is_plate:
+                _plate_debug_state(self.env, self.target_obj, "after-pick-home")
         return True, "pick"
 
     def _prepare_plate_place_path(self):
         replay = self.plate_replay
         if replay is not None:
+            _plate_debug_state(self.env, self.target_obj, "using-saved-place-replay", region_name=self.target_region)
             self.plate_motion_to_pre = replay["motion_to_pre"]
             self.plate_traj_down = replay["traj_down"]
             self.plate_traj_in = replay["traj_in"]
@@ -4372,19 +4527,20 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
         else:
             tol_xy = 0.04
             tol_z = 0.06 if self.is_plate else 0.08
+        validation_region = _validation_region_name(self.env, self.target_region)
         in_region = _is_in_region(
             self.env,
             self.target_obj,
-            self.target_region,
+            validation_region,
             tol_xy=tol_xy,
             tol_z=tol_z,
         )
         if (disp < 0.03) or (not in_region):
             return False, (
                 f"validation failed for '{self.obj_name}' "
-                f"(disp={disp:.3f}, in_region={in_region})"
+                f"(disp={disp:.3f}, in_region={in_region}, validation_region={validation_region})"
             )
-        print(f"✓ Validation passed: moved {disp:.3f}m and inside '{self.target_region}'")
+        print(f"✓ Validation passed: moved {disp:.3f}m and inside '{validation_region}'")
         print(f"Task '{self.task_name}' complete!")
         return True, "place"
 
@@ -4405,9 +4561,13 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             print(f"[plate-place] WARNING: could not fix plate orientation before path_down: {exc}")
 
     def _place_plate(self):
+        _plate_debug_state(self.env, self.target_obj, "before-place-orientation-fix", region_name=self.target_region)
         self._fix_plate_orientation_before_place()
+        _plate_debug_state(self.env, self.target_obj, "after-place-orientation-fix", region_name=self.target_region)
         execute_trajectory(self.env, self.pr, self.plate_traj_down, steps_per_segment=5)
+        _plate_debug_state(self.env, self.target_obj, "after-place-down", region_name=self.target_region)
         execute_trajectory(self.env, self.pr, self.plate_traj_in, steps_per_segment=6)
+        _plate_debug_state(self.env, self.target_obj, "after-place-in-before-release", region_name=self.target_region)
 
         print(f"Releasing {self.obj_name}...")
         release_object(
@@ -4418,6 +4578,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             freeze_after_release=True,
             settle_steps=8,
         )
+        _plate_debug_state(self.env, self.target_obj, "after-release", region_name=self.target_region)
         lift_object_if_submerged(
             self.env,
             self.pr,
@@ -4425,6 +4586,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             target_region=self.target_region,
             clearance=float(os.environ.get("GRILL_PLATE_MIN_CLEARANCE", "0.003")),
         )
+        _plate_debug_state(self.env, self.target_obj, "after-release-lift-check", region_name=self.target_region)
 
         if _target_is_grasped(self.env, self.target_obj):
             print("[plate] WARNING: still grasped after release, forcing detach...")
@@ -4437,13 +4599,16 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
                 step(self.pr, 4)
                 if not _target_is_grasped(self.env, self.target_obj):
                     break
+            _plate_debug_state(self.env, self.target_obj, "after-forced-detach", region_name=self.target_region)
         if _target_is_grasped(self.env, self.target_obj):
             return False, "plate remained attached after forced release"
 
         print("[plate-retreat] horizontal clear from release pose.")
         execute_trajectory(self.env, self.pr, self.plate_traj_out_low, steps_per_segment=6)
+        _plate_debug_state(self.env, self.target_obj, "after-horizontal-retreat", region_name=self.target_region)
         print("[plate-retreat] upward clear to high hover.")
         execute_trajectory(self.env, self.pr, self.plate_traj_up, steps_per_segment=5)
+        _plate_debug_state(self.env, self.target_obj, "after-upward-retreat", region_name=self.target_region)
         lift_object_if_submerged(
             self.env,
             self.pr,
@@ -4451,6 +4616,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             target_region=self.target_region,
             clearance=float(os.environ.get("GRILL_PLATE_MIN_CLEARANCE", "0.003")),
         )
+        _plate_debug_state(self.env, self.target_obj, "after-retreat-lift-check", region_name=self.target_region)
 
         if os.environ.get("GRILL_PLATE_ENABLE_PHYSICS_SETTLE", "False") == "True":
             settle_on_region_without_snap(
@@ -4472,6 +4638,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
             step(self.pr, 8)
 
         step(self.pr, 10)
+        _plate_debug_state(self.env, self.target_obj, "before-place-to-home", region_name=self.target_region)
         home_q = self._home_conf()
         if self.plate_replay is not None and "place_to_home" in self.plate_replay:
             print("[plate-replay] Replaying place->home.")
@@ -4498,6 +4665,7 @@ class GrillPrimitiveTransferExecutor(GrillPrimitiveExecutorBase):
                     pass
                 step(self.pr, 10)
             self.plate_record_segments["place_to_home"] = place_to_home
+        _plate_debug_state(self.env, self.target_obj, "after-place-to-home-before-validation", region_name=self.target_region)
         self.plate_record_metadata["plate_pose_after"] = list(self.target_obj.get_pose())
         _record_plate_replay_segments(
             _scene_variant_id(),
