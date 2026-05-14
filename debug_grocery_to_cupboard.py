@@ -47,7 +47,7 @@ def _configure_qt(headless):
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description="Test one grocery -> cupboard_boundary transfer")
+    parser = argparse.ArgumentParser(description="Test grocery -> cupboard_boundary transfer")
     parser.add_argument(
         "--variant",
         choices=sorted(KITCHEN_VARIANTS),
@@ -57,7 +57,7 @@ def _parse_args():
     parser.add_argument("--scene", default="", help="Explicit .ttt scene path. Overrides --variant.")
     parser.add_argument(
         "--source",
-        choices=("auto", "box", "table"),
+        choices=("auto", "box", "table", "both"),
         default="auto",
         help="Which grocery source path to test",
     )
@@ -280,37 +280,8 @@ def _should_open_box_first(args, source):
     return True
 
 
-def _run_test(args, scene_path):
-    from rlbench_kitchen_streams import ENV
-    import ground_truth_orchestrator as gt
-
-    env = ENV
-    pr = env.pr
-
-    print("=" * 70)
-    print("GROCERY -> CUPBOARD_BOUNDARY DEBUG TEST")
-    print(f"Scene : {scene_path}")
-    print(f"Source: {args.source}")
-    print(f"Target: {args.target_region}")
-    print("=" * 70)
-
-    output_source = args.source if args.source != "auto" else "auto"
-    output_path = os.path.abspath(args.output or _default_output_path(args, output_source))
-    video_dir = os.path.abspath(
-        args.video_dir
-        or os.path.join(os.path.dirname(output_path), "videos")
-    )
-
-    if args.record_video:
-        print(f"Initializing video recorder at {video_dir}")
-        gt.VIDEO_RECORDER = gt.VideoRecorder(env, output_dir=video_dir, fps=30)
-    else:
-        gt.VIDEO_RECORDER = None
-
-    print("Settling physics...")
-    gt.step_and_record(pr, max(0, int(args.settle_steps)))
-
-    grocery_name, source = _select_grocery(env, args.source, explicit_grocery=args.grocery)
+def _run_transfer(env, gt, args, requested_source):
+    grocery_name, source = _select_grocery(env, requested_source, explicit_grocery=args.grocery)
     grocery = env.get_object(grocery_name)
     start_pose = _pose_list(grocery)
     start_pos = _pos_list(grocery)
@@ -353,16 +324,10 @@ def _run_test(args, scene_path):
     if success:
         gt.go_home(env)
 
-    if gt.VIDEO_RECORDER:
-        gt.VIDEO_RECORDER.release()
-        gt.VIDEO_RECORDER = None
-
-    summary = {
+    return {
         "success": bool(success),
         "grocery": grocery_name,
         "source": source,
-        "variant": args.variant,
-        "scene_path": scene_path,
         "target_region": args.target_region,
         "opened_box_first": bool(opened_box),
         "start_position": start_pos,
@@ -373,12 +338,80 @@ def _run_test(args, scene_path):
         "in_target_bbox": bool(in_target),
         "target_validator_passed": bool(validator_passed),
         "execution_time_s": float(elapsed),
-        "record_video": bool(args.record_video),
-        "video_dir": video_dir if args.record_video else None,
     }
+
+
+def _run_test(args, scene_path):
+    from rlbench_kitchen_streams import ENV
+    import ground_truth_orchestrator as gt
+
+    if args.source == "both" and args.grocery:
+        raise RuntimeError("--grocery can only be used with one source, not --source both")
+
+    env = ENV
+    pr = env.pr
+
+    print("=" * 70)
+    print("GROCERY -> CUPBOARD_BOUNDARY DEBUG TEST")
+    print(f"Scene : {scene_path}")
+    print(f"Source: {args.source}")
+    print(f"Target: {args.target_region}")
+    print("=" * 70)
+
+    output_source = args.source if args.source != "auto" else "auto"
+    output_path = os.path.abspath(args.output or _default_output_path(args, output_source))
+    video_dir = os.path.abspath(
+        args.video_dir
+        or os.path.join(os.path.dirname(output_path), "videos")
+    )
+
+    if args.record_video:
+        print(f"Initializing video recorder at {video_dir}")
+        gt.VIDEO_RECORDER = gt.VideoRecorder(env, output_dir=video_dir, fps=30)
+    else:
+        gt.VIDEO_RECORDER = None
+
+    print("Settling physics...")
+    gt.step_and_record(pr, max(0, int(args.settle_steps)))
+
+    requested_sources = ["box", "table"] if args.source == "both" else [args.source]
+    transfers = []
+    for requested_source in requested_sources:
+        transfer = _run_transfer(env, gt, args, requested_source)
+        transfers.append(transfer)
+        if not (transfer["success"] and transfer["target_validator_passed"]):
+            break
+
+    if gt.VIDEO_RECORDER:
+        gt.VIDEO_RECORDER.release()
+        gt.VIDEO_RECORDER = None
+
+    ok = all(t["success"] and t["target_validator_passed"] for t in transfers)
+    if args.source == "both":
+        summary = {
+            "success": bool(ok),
+            "variant": args.variant,
+            "scene_path": scene_path,
+            "target_region": args.target_region,
+            "requested_source": args.source,
+            "transfers": transfers,
+            "record_video": bool(args.record_video),
+            "video_dir": video_dir if args.record_video else None,
+        }
+    else:
+        summary = dict(transfers[0])
+        summary.update(
+            {
+                "variant": args.variant,
+                "scene_path": scene_path,
+                "record_video": bool(args.record_video),
+                "video_dir": video_dir if args.record_video else None,
+            }
+        )
+
     _write_summary(output_path, summary)
 
-    if success and validator_passed:
+    if ok:
         print("PASS: grocery -> cupboard completed.")
         return True
     print("FAIL: grocery -> cupboard did not validate cleanly.")

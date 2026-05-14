@@ -223,6 +223,7 @@ def _run_test(args, scene_path):
     print(f"Selected mug_on_box: {mug_name}")
     print(f"Start position: {start_pos}")
 
+    gt.reset_carry_height_tracks()
     start_time = time.time()
     success = gt.run_box_pick_place(
         env,
@@ -261,6 +262,7 @@ def _run_test(args, scene_path):
         "in_placement_boundary_bbox": bool(in_placement),
         "placement_validator_passed": bool(on_table),
         "execution_time_s": float(elapsed),
+        "carry_height_tracks": gt.get_carry_height_tracks(),
         "record_video": bool(args.record_video),
         "video_dir": video_dir if args.record_video else None,
     }

@@ -59,6 +59,7 @@ VIDEO_RECORDER = None
 MASK_RECORDER = None  # For segmentation mask videos
 STEP_CALLBACK = None  # Optional per-step hook (e.g., live segmentation viewer update)
 ACTION_PROGRESS_CALLBACK = None  # Optional primitive-action callback for live panels
+CARRY_HEIGHT_TRACKS = []  # Optional diagnostics for held-object carry moves.
 KITCHEN_REPLAY_DIR = os.path.join(os.path.dirname(__file__), "precomputed_paths")
 BOX_LID_OPEN_REPLAY_PATH = os.path.join(KITCHEN_REPLAY_DIR, "kitchen_box_lid_open.json")
 
@@ -121,6 +122,17 @@ def _emit_action_progress(action_name, action_label=None):
     except Exception:
         # Never let UI hooks break task execution.
         pass
+
+
+def reset_carry_height_tracks():
+    """Clear recorded held-object carry height diagnostics."""
+    global CARRY_HEIGHT_TRACKS
+    CARRY_HEIGHT_TRACKS = []
+
+
+def get_carry_height_tracks():
+    """Return recorded held-object carry height diagnostics."""
+    return list(CARRY_HEIGHT_TRACKS)
 
 
 def step_and_record(pr, count=1):
@@ -290,6 +302,20 @@ def _is_holding_any_object(env):
     return bool(grasped)
 
 
+def _grasped_object_names(env):
+    try:
+        grasped = env.gripper.get_grasped_objects()
+    except Exception:
+        return []
+    names = []
+    for obj in grasped:
+        try:
+            names.append(obj.get_name())
+        except Exception:
+            continue
+    return names
+
+
 def _move_to_conf_via_high_hover(env, target_conf):
     """
     Move to target joint config via a high-Z Cartesian hover path.
@@ -353,10 +379,37 @@ def _move_to_conf_via_high_hover(env, target_conf):
     if (path_lift is None) or (path_transfer is None):
         return False
 
+    held_names = _grasped_object_names(env)
+    z_samples = []
+
+    def _sample_heights():
+        for name in held_names:
+            obj = env.get_object(name)
+            if obj is None:
+                continue
+            try:
+                z_samples.append(float(obj.get_position()[2]))
+            except Exception:
+                pass
+
+    _sample_heights()
     _emit_action_progress("move", "move")
     execute_trajectory(env, path_lift._path_points.reshape(-1, 7).tolist(), steps=3)
+    _sample_heights()
     _emit_action_progress("move", "move")
     execute_trajectory(env, path_transfer._path_points.reshape(-1, 7).tolist(), steps=3)
+    _sample_heights()
+
+    if held_names and z_samples:
+        CARRY_HEIGHT_TRACKS.append({
+            "object_names": held_names,
+            "start_z": float(z_samples[0]),
+            "end_z": float(z_samples[-1]),
+            "min_z": float(min(z_samples)),
+            "max_z": float(max(z_samples)),
+            "sample_count": int(len(z_samples)),
+            "target_conf": [float(v) for v in target_conf],
+        })
 
     # Intentionally stop at high hover above target XY.
     # Place action will perform the final descent directly to release.
@@ -1499,6 +1552,13 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
         return self._pick_standard()
 
     def _move_to_place(self):
+        if (
+            self.box_mode
+            and self.target_region == "placement_boundary"
+            and self.object_name not in ("mug4", "mug_inside_box")
+        ):
+            print("[Move] Skipping planner carry move; place stage will move to lower_traj start.")
+            return True, "move"
         return self._run_move_group(self.pre_place_moves)
 
     def _place(self):
