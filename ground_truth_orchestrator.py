@@ -10,6 +10,7 @@ Performs all 6 tasks in sequence:
 """
 import os
 import sys
+import json
 import numpy as np
 import time
 import math
@@ -58,6 +59,8 @@ VIDEO_RECORDER = None
 MASK_RECORDER = None  # For segmentation mask videos
 STEP_CALLBACK = None  # Optional per-step hook (e.g., live segmentation viewer update)
 ACTION_PROGRESS_CALLBACK = None  # Optional primitive-action callback for live panels
+KITCHEN_REPLAY_DIR = os.path.join(os.path.dirname(__file__), "precomputed_paths")
+BOX_LID_OPEN_REPLAY_PATH = os.path.join(KITCHEN_REPLAY_DIR, "kitchen_box_lid_open.json")
 
 
 def _env_int(name, default, min_value=1):
@@ -427,6 +430,66 @@ def _move_to_place_release_direct(env, segments, release_idx):
         pass
 
     return False
+
+
+def _move_to_trajectory_start(env, traj, steps=50):
+    """Move from the current configuration to the first waypoint of a trajectory."""
+    if not traj:
+        return False
+    start_conf = traj[0]
+    current_q = env.get_robot_conf()
+    try:
+        path = env._interpolate_joint_path(
+            current_q,
+            start_conf,
+            steps=max(1, int(steps)),
+            check_collisions=False,
+        )
+        if path is not None and len(path) > 0:
+            execute_trajectory(env, path, steps=3)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _move_to_home_from_current(env, label="[BoxPlace]"):
+    current_q = env.get_robot_conf()
+    home_q = env.get_home_conf()
+    if np.allclose(current_q, home_q, atol=1e-3):
+        return True
+
+    print(f"{label} Returning home.")
+    traj = None
+    try:
+        traj = env.compute_motion_plan(current_q, home_q)
+    except Exception:
+        traj = None
+
+    try:
+        env.set_robot_conf(current_q)
+    except Exception:
+        pass
+
+    if traj is None or len(traj) == 0:
+        try:
+            traj = env._interpolate_joint_path(
+                current_q,
+                home_q,
+                steps=100,
+                check_collisions=False,
+            )
+        except Exception:
+            traj = None
+
+    if traj is not None and len(traj) > 0:
+        execute_trajectory(env, traj)
+        return True
+    return False
+
+
+def _is_box_target_region(region_name):
+    return region_name in ("box_boundary", "box-inside", "box_storage", "box_inside_fallback")
 
 
 def _object_handle(obj):
@@ -891,6 +954,169 @@ def ensure_lid_open_for_box_tasks(env, closed_pos_xy, min_xy=None, retries=2):
     return current >= float(min_xy)
 
 
+def _box_lid_replay_path():
+    return os.environ.get("KITCHEN_BOX_LID_REPLAY_PATH", BOX_LID_OPEN_REPLAY_PATH)
+
+
+def _coerce_replay_segment(segment):
+    if not isinstance(segment, list) or not segment:
+        return None
+    coerced = []
+    for q in segment:
+        if not isinstance(q, (list, tuple, np.ndarray)) or len(q) != 7:
+            return None
+        coerced.append([float(v) for v in q])
+    return coerced
+
+
+def _valid_replay_segment(segment):
+    return _coerce_replay_segment(segment) is not None
+
+
+def _load_box_lid_open_replay(env, lid_obj, pos_before):
+    path = _box_lid_replay_path()
+    if not path or not os.path.exists(path):
+        return None, None
+
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"[box-lid-replay] failed to read {path}: {exc}")
+        return None, None
+
+    segments = data.get("segments")
+    required = ("motion_to_hover", "approach", "open", "return", "retreat")
+    if not isinstance(segments, dict) or not all(
+        _valid_replay_segment(segments.get(name)) for name in required
+    ):
+        print(f"[box-lid-replay] invalid replay file: {path}")
+        return None, None
+
+    saved_lid_pos = data.get("lid_pos_before")
+    if saved_lid_pos is not None:
+        tol = float(os.environ.get("KITCHEN_BOX_LID_REPLAY_POS_TOL", "0.04"))
+        delta = float(
+            np.linalg.norm(
+                np.array(saved_lid_pos[:3], dtype=float)
+                - np.array(pos_before[:3], dtype=float)
+            )
+        )
+        if delta > tol:
+            print(
+                f"[box-lid-replay] lid start mismatch; saved/current delta={delta:.3f}m, "
+                f"tol={tol:.3f}. Falling back to runtime planning."
+            )
+            return None, None
+
+    replay_segments = {name: _coerce_replay_segment(segments[name]) for name in required}
+    home_return = _coerce_replay_segment(segments.get("home_return"))
+    if home_return is not None:
+        replay_segments["home_return"] = home_return
+
+    print(f"[box-lid-replay] loaded trajectory from {path}")
+    return replay_segments, path
+
+
+def record_box_lid_open_replay(path, env, lid_obj, segments, metadata=None):
+    def _float_list(values):
+        return [float(v) for v in values]
+
+    required = ("motion_to_hover", "approach", "open", "return", "retreat")
+    normalized = {
+        name: _coerce_replay_segment(segments.get(name))
+        for name in required
+    }
+    if not all(normalized.values()):
+        raise ValueError("box-lid replay requires non-empty 7-DOF trajectory segments")
+    home_return = _coerce_replay_segment(segments.get("home_return"))
+    if home_return is not None:
+        normalized["home_return"] = home_return
+
+    output_path = path or BOX_LID_OPEN_REPLAY_PATH
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    metadata = metadata or {}
+    lid_pos_before = metadata.get("lid_pos_before", list(lid_obj.get_position()))
+    data = {
+        "kind": "kitchen_box_lid_open",
+        "scene_path": os.environ.get("KITCHEN_SCENE_FILE"),
+        "lid_pos_before": _float_list(lid_pos_before),
+        "home_conf": _float_list(env.get_home_conf()),
+        "steps_per_segment": DEFAULT_EXEC_INTERP_STEPS,
+        "metadata": metadata,
+        "segments": normalized,
+    }
+    with open(output_path, "w") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    print(f"[box-lid-replay] wrote trajectory to {output_path}")
+    return output_path
+
+
+def _execute_box_lid_open_replay(env, lid_obj, pos_before, segments, replay_path, target_open_xy):
+    print(f"[box-lid-replay] executing saved box-lid trajectory: {replay_path}")
+    _emit_action_progress("open-lid", "open-lid")
+
+    print("[box-lid-replay] Moving to hover...")
+    execute_trajectory(env, segments["motion_to_hover"], steps=5)
+
+    print("[box-lid-replay] Approaching grasp...")
+    execute_trajectory(env, segments["approach"], steps=5)
+
+    print("[box-lid-replay] Grasping lid...")
+    env.gripper.actuate(0.0, 0.1)
+    step_and_record(env.pr, 30)
+    env.gripper.grasp(lid_obj)
+
+    print("[box-lid-replay] Sliding lid open...")
+    execute_trajectory(env, segments["open"], steps=5)
+
+    opened_target, displacement_xy, _ = validate_lid_opened(
+        lid_obj, pos_before, min_displacement_xy=target_open_xy
+    )
+    if not opened_target:
+        print(
+            f"[box-lid-replay] replay opened {displacement_xy:.3f}m; "
+            f"target is {target_open_xy:.3f}m. Applying corrective slide..."
+        )
+        opened_target, displacement_xy = _ensure_lid_open_distance(
+            env, lid_obj, pos_before, target_open_xy
+        )
+
+    print("[box-lid-replay] Releasing lid...")
+    env.gripper.release()
+    env.gripper.actuate(1.0, 0.1)
+    step_and_record(env.pr, 50)
+
+    print("[box-lid-replay] Returning...")
+    execute_trajectory(env, segments["return"], steps=5)
+
+    print("[box-lid-replay] Retreating to hover...")
+    execute_trajectory(env, segments["retreat"], steps=5)
+
+    home_return = segments.get("home_return")
+    if home_return is not None:
+        print("[box-lid-replay] Returning home along saved reverse entry path...")
+        execute_trajectory(env, home_return, steps=5)
+    step_and_record(env.pr, 50)
+
+    opened, displacement_xy, _ = validate_lid_opened(
+        lid_obj, pos_before, min_displacement_xy=target_open_xy
+    )
+    if not opened:
+        print(
+            f"ERROR: Saved box-lid trajectory did not open enough "
+            f"(XY displacement: {displacement_xy:.3f}m, required: {target_open_xy:.3f}m)"
+        )
+        return False
+
+    print(f"[box-lid-replay] Validation passed: Lid slid {displacement_xy:.3f}m")
+    return True
+
+
 def interpolate_path(env, q1, q2, steps=50):
     """Interpolate between two configurations."""
     traj = []
@@ -1297,10 +1523,21 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
             return False, "place has empty trajectory"
 
         release_idx = _place_release_segment_index(self.env, p, segments)
-        moved_to_release = _move_to_place_release_direct(self.env, segments, release_idx)
-        if not moved_to_release:
-            for seg in segments[:release_idx + 1]:
-                execute_trajectory(self.env, seg)
+        is_box_target = _is_box_target_region(self.target_region)
+        descent_traj = segments[release_idx] if is_box_target else None
+        if is_box_target:
+            if not descent_traj:
+                return False, "box place has empty descent trajectory"
+            print("[BoxPlace] Moving to planned box hover.")
+            if not _move_to_trajectory_start(self.env, descent_traj):
+                return False, "Could not move to planned box hover"
+            print("[BoxPlace] Descending along planned lower_traj.")
+            execute_trajectory(self.env, descent_traj)
+        else:
+            moved_to_release = _move_to_place_release_direct(self.env, segments, release_idx)
+            if not moved_to_release:
+                for seg in segments[:release_idx + 1]:
+                    execute_trajectory(self.env, seg)
 
         print(f"Releasing {o}...")
         target_obj = self.env.get_object(o)
@@ -1333,29 +1570,35 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
                 step_and_record(self.pr, 1)
             target_obj.set_dynamic(False)
 
-        current_q = self.env.get_robot_conf()
-        target_retreat_conf = segments[-1][-1]
-        self.env.set_robot_conf(target_retreat_conf)
-        target_pos = self.env.robot.get_position()
-        target_quat = self.env.robot.get_quaternion()
-        self.env.set_robot_conf(current_q)
-
-        try:
-            path_retreat = self.env.robot.get_linear_path(
-                position=target_pos,
-                quaternion=target_quat,
-                steps=50,
-                ignore_collisions=True,
-            )
-        except Exception:
-            path_retreat = None
-
-        if path_retreat:
-            retreat_traj = path_retreat._path_points.reshape(-1, 7).tolist()
-            execute_trajectory(self.env, retreat_traj)
+        if is_box_target:
+            print("[BoxPlace] Ascending using reverse lower_traj.")
+            execute_trajectory(self.env, descent_traj[::-1])
+            if not _move_to_home_from_current(self.env):
+                return False, "Could not return home after box placement"
         else:
-            for seg in segments[release_idx + 1:]:
-                execute_trajectory(self.env, seg)
+            current_q = self.env.get_robot_conf()
+            target_retreat_conf = segments[-1][-1]
+            self.env.set_robot_conf(target_retreat_conf)
+            target_pos = self.env.robot.get_position()
+            target_quat = self.env.robot.get_quaternion()
+            self.env.set_robot_conf(current_q)
+
+            try:
+                path_retreat = self.env.robot.get_linear_path(
+                    position=target_pos,
+                    quaternion=target_quat,
+                    steps=50,
+                    ignore_collisions=True,
+                )
+            except Exception:
+                path_retreat = None
+
+            if path_retreat:
+                retreat_traj = path_retreat._path_points.reshape(-1, 7).tolist()
+                execute_trajectory(self.env, retreat_traj)
+            else:
+                for seg in segments[release_idx + 1:]:
+                    execute_trajectory(self.env, seg)
         return True, "place"
 
     def _pick_box(self):
@@ -1385,9 +1628,19 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
 
         norm_segments = _normalize_segments(traj_tuple)
         release_idx = _place_release_segment_index(self.env, p, norm_segments) if norm_segments else 0
-        moved_to_release = _move_to_place_release_direct(self.env, norm_segments, release_idx)
-        if not moved_to_release:
+        is_box_target = _is_box_target_region(self.target_region)
+        if is_box_target:
+            if not lower_traj:
+                return False, "box place has empty descent trajectory"
+            print("[BoxPlace] Moving to planned box hover.")
+            if not _move_to_trajectory_start(self.env, lower_traj):
+                return False, "Could not move to planned box hover"
+            print("[BoxPlace] Descending along planned lower_traj.")
             execute_trajectory(self.env, lower_traj)
+        else:
+            moved_to_release = _move_to_place_release_direct(self.env, norm_segments, release_idx)
+            if not moved_to_release:
+                execute_trajectory(self.env, lower_traj)
 
         print(f"Releasing {o}...")
         target_obj = self.env.get_object(o)
@@ -1420,7 +1673,14 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
                 step_and_record(self.pr, 1)
             target_obj.set_dynamic(False)
 
-        if lift_traj is not None and len(lift_traj) > 0:
+        if is_box_target:
+            print("[BoxPlace] Ascending using reverse lower_traj.")
+            execute_trajectory(self.env, lower_traj[::-1])
+            if home_traj is not None and len(home_traj) > 0:
+                execute_trajectory(self.env, home_traj)
+            elif not _move_to_home_from_current(self.env):
+                return False, "Could not return home after box placement"
+        elif lift_traj is not None and len(lift_traj) > 0:
             current_q = self.env.get_robot_conf()
             target_retreat_conf = lift_traj[-1]
             self.env.set_robot_conf(target_retreat_conf)
@@ -1443,7 +1703,7 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
             except Exception:
                 execute_trajectory(self.env, [current_q] + lift_traj)
 
-        if home_traj is not None and len(home_traj) > 0:
+        if (not is_box_target) and home_traj is not None and len(home_traj) > 0:
             execute_trajectory(self.env, home_traj)
         return True, "place"
 
@@ -1482,7 +1742,8 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
             quaternion_from_euler(np.pi, base_ry, 0),
         ]
 
-        target_z = self.pose[2]
+        cupboard_pick_height_offset = 0.05
+        target_z = self.pose[2] + cupboard_pick_height_offset
         grasp_depth_offset = 0.03
         self.grasp_pos = None
         self.hover_pos = None
@@ -1715,6 +1976,7 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
         self.env.set_robot_conf(pre_place_search_conf)
         if self.q_place_hover is None:
             return False, "Could not find place hover configuration"
+        self.place_lower_traj = None
 
         print("Moving to place hover...")
         current_conf = self.env.get_robot_conf()
@@ -1748,6 +2010,7 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
 
         if path_lower is not None:
             traj_lower = path_lower._path_points.reshape(-1, 7).tolist()
+            self.place_lower_traj = traj_lower
             for conf in traj_lower:
                 self.env.set_robot_conf(conf)
                 step_and_record(self.pr, 1)
@@ -1771,6 +2034,7 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
                     self.env.get_robot_conf(), q_place, steps=50, check_collisions=False
                 )
                 if traj_lower is not None and len(traj_lower) > 0:
+                    self.place_lower_traj = traj_lower
                     for conf in traj_lower:
                         self.env.set_robot_conf(conf)
                         step_and_record(self.pr, 1)
@@ -1813,39 +2077,47 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
         if not released_ok:
             return False, f"'{self.object_name}' is still attached after release attempts."
 
-        print("Lifting...")
-        path_lift = None
-        try:
-            lift_pos = [
-                self.successful_place_pos[0],
-                self.successful_place_pos[1],
-                self.successful_place_pos[2] + 0.15,
-            ]
-            path_lift = self.env.robot.get_linear_path(
-                position=lift_pos,
-                quaternion=self.successful_place_quat,
-                steps=50,
-                ignore_collisions=True,
-            )
-        except Exception:
-            path_lift = None
-
-        if path_lift is not None:
-            traj_lift = path_lift._path_points.reshape(-1, 7).tolist()
-            for conf in traj_lift:
+        if _is_box_target_region(self.target_region) and self.place_lower_traj:
+            print("[BoxPlace] Ascending using reverse lower_traj.")
+            for conf in self.place_lower_traj[::-1]:
                 self.env.set_robot_conf(conf)
                 step_and_record(self.pr, 1)
+            if not _move_to_home_from_current(self.env):
+                return False, "Could not return home after box placement"
         else:
-            traj_lift = self.env._interpolate_joint_path(
-                self.env.get_robot_conf(),
-                self.q_place_hover,
-                steps=50,
-                check_collisions=False,
-            )
-            if traj_lift is not None and len(traj_lift) > 0:
+            print("Lifting...")
+            path_lift = None
+            try:
+                lift_pos = [
+                    self.successful_place_pos[0],
+                    self.successful_place_pos[1],
+                    self.successful_place_pos[2] + 0.15,
+                ]
+                path_lift = self.env.robot.get_linear_path(
+                    position=lift_pos,
+                    quaternion=self.successful_place_quat,
+                    steps=50,
+                    ignore_collisions=True,
+                )
+            except Exception:
+                path_lift = None
+
+            if path_lift is not None:
+                traj_lift = path_lift._path_points.reshape(-1, 7).tolist()
                 for conf in traj_lift:
                     self.env.set_robot_conf(conf)
                     step_and_record(self.pr, 1)
+            else:
+                traj_lift = self.env._interpolate_joint_path(
+                    self.env.get_robot_conf(),
+                    self.q_place_hover,
+                    steps=50,
+                    check_collisions=False,
+                )
+                if traj_lift is not None and len(traj_lift) > 0:
+                    for conf in traj_lift:
+                        self.env.set_robot_conf(conf)
+                        step_and_record(self.pr, 1)
 
         self.mug.set_pose(self.final_place_obj_pose)
         self.mug.set_dynamic(False)
@@ -2051,6 +2323,21 @@ def run_open_box(env, task_name=""):
     _emit_action_progress("open-lid", "open-lid")
 
     try:
+        replay_segments, replay_path = _load_box_lid_open_replay(env, obj, pos_before)
+        if replay_segments is not None:
+            success = _execute_box_lid_open_replay(
+                env,
+                obj,
+                pos_before,
+                replay_segments,
+                replay_path,
+                target_open_xy,
+            )
+            if success:
+                print(f"Task '{task_name}' complete!")
+                print(f"[PrimitiveExecutor] DONE  1/1: open-lid (open-lid) | {object_name}")
+            return success
+
         print("Computing grasp trajectory...")
         grasp_quat, q_hover, q_grasp, (traj_hover_to_center, traj_center_to_edge) = env.compute_lid_grasp_trajectory(obj)
         traj_approach = traj_hover_to_center + traj_center_to_edge

@@ -19,6 +19,7 @@ from llm_pipeline.region_aliases import (
 
 DEFAULT_SCENE_FILE = os.path.join(os.path.dirname(__file__), "task1_variation1.ttt")
 SCENE_FILE = os.environ.get("KITCHEN_SCENE_FILE", DEFAULT_SCENE_FILE)
+MUG_PLACEMENT_MIN_SAMPLE_Z = float(os.environ.get("MUG_PLACEMENT_MIN_SAMPLE_Z", "0.8"))
 
 class RLBenchKitchenEnv:
     def __init__(self, headless=True):
@@ -380,6 +381,10 @@ class RLBenchKitchenEnv:
         if (w_max_y - w_min_y) < 2*padding: padding = 0
         
         current_pose = obj.get_pose()
+        try:
+            is_mug = "mug" in str(obj.get_name()).lower()
+        except Exception:
+            is_mug = False
 
         def sample_clear_xy(min_x, max_x, min_y, max_y, grid_n, occ_pad_xy, occ_pad_z):
             xs = np.linspace(min_x, max_x, grid_n).tolist()
@@ -483,6 +488,8 @@ class RLBenchKitchenEnv:
             )
 
             sample_z = w_min_z + float(os.environ.get("BOX_REGION_SAMPLE_Z_OFFSET", "0.012"))
+            if is_mug:
+                sample_z = max(sample_z, MUG_PLACEMENT_MIN_SAMPLE_Z)
         elif region_name == 'placement_boundary':
             placement_padding = float(os.environ.get("PLACEMENT_BOUNDARY_SAMPLE_PADDING", str(padding)))
             if (w_max_x - w_min_x) < 2 * placement_padding:
@@ -510,6 +517,8 @@ class RLBenchKitchenEnv:
                 sample_z = t_max_z + 0.005
             else:
                 sample_z = w_min_z + 0.005
+            if is_mug:
+                sample_z = max(sample_z, MUG_PLACEMENT_MIN_SAMPLE_Z)
         elif region_name == 'cupboard_lower':
             cupboard_padding = float(os.environ.get("CUPBOARD_LOWER_SAMPLE_PADDING", str(padding)))
             if (w_max_x - w_min_x) < 2 * cupboard_padding:
@@ -832,12 +841,17 @@ class RLBenchKitchenEnv:
                 # --- HORIZONTAL PICK STRATEGY ---
                 # Target Pose: Object's current position
                 ref_pos = live_pos if adaptive_pick_mode else planned_pose
-                target_pos = [ref_pos[0], ref_pos[1], ref_pos[2]]
+                cupboard_pick_height_offset = 0.05
+                target_pos = [
+                    ref_pos[0],
+                    ref_pos[1],
+                    ref_pos[2] + cupboard_pick_height_offset,
+                ]
                 
                 # Hover Pose: In front of cupboard (shifted -X)
                 # User requested 25cm clearance and strictly horizontal approach
                 hover_dist = 0.25 
-                hover_pos = [ref_pos[0] - hover_dist, ref_pos[1], ref_pos[2]]
+                hover_pos = [ref_pos[0] - hover_dist, ref_pos[1], target_pos[2]]
                 
                 # Grasp Orientation: Horizontal (Fingers Horizontal)
                 # Base orientation: Ry=pi/2 (Z points +X)

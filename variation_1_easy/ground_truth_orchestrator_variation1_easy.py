@@ -24,6 +24,7 @@ import numpy as np
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(THIS_DIR)
 SCENE_PATH = os.path.join(ROOT_DIR, "task1_variation1.ttt")
+MUG_PLACEMENT_MIN_SAMPLE_Z = float(os.environ.get("MUG_PLACEMENT_MIN_SAMPLE_Z", "0.8"))
 
 # Ensure the shared env boots this variation scene.
 os.environ["KITCHEN_SCENE_FILE"] = SCENE_PATH
@@ -265,7 +266,7 @@ def _compute_box_slot_poses(env, mug_names):
             obj_min_z = float(obj.get_bounding_box()[4])
         except Exception:
             obj_min_z = 0.0
-        z = support_z - obj_min_z + 0.0005
+        z = max(support_z - obj_min_z + 0.0005, MUG_PLACEMENT_MIN_SAMPLE_Z)
         slot_map[name] = [
             float(xs[i]),
             float(ys[i]),
