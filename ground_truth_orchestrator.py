@@ -453,7 +453,7 @@ def _move_to_trajectory_start(env, traj, steps=50):
     return False
 
 
-def _move_to_home_from_current(env, label="[BoxPlace]"):
+def _move_to_home_from_current(env, label="[Place]"):
     current_q = env.get_robot_conf()
     home_q = env.get_home_conf()
     if np.allclose(current_q, home_q, atol=1e-3):
@@ -490,6 +490,10 @@ def _move_to_home_from_current(env, label="[BoxPlace]"):
 
 def _is_box_target_region(region_name):
     return region_name in ("box_boundary", "box-inside", "box_storage", "box_inside_fallback")
+
+
+def _uses_reverse_descent_place(region_name):
+    return _is_box_target_region(region_name) or region_name == "placement_boundary"
 
 
 def _object_handle(obj):
@@ -1523,15 +1527,16 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
             return False, "place has empty trajectory"
 
         release_idx = _place_release_segment_index(self.env, p, segments)
-        is_box_target = _is_box_target_region(self.target_region)
-        descent_traj = segments[release_idx] if is_box_target else None
-        if is_box_target:
+        reverse_descent_place = _uses_reverse_descent_place(self.target_region)
+        home_traj = segments[-1] if len(segments) > 2 else None
+        descent_traj = segments[release_idx] if reverse_descent_place else None
+        if reverse_descent_place:
             if not descent_traj:
-                return False, "box place has empty descent trajectory"
-            print("[BoxPlace] Moving to planned box hover.")
+                return False, "place has empty descent trajectory"
+            print("[Place] Moving to planned place hover.")
             if not _move_to_trajectory_start(self.env, descent_traj):
-                return False, "Could not move to planned box hover"
-            print("[BoxPlace] Descending along planned lower_traj.")
+                return False, "Could not move to planned place hover"
+            print("[Place] Descending along planned lower_traj.")
             execute_trajectory(self.env, descent_traj)
         else:
             moved_to_release = _move_to_place_release_direct(self.env, segments, release_idx)
@@ -1570,11 +1575,13 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
                 step_and_record(self.pr, 1)
             target_obj.set_dynamic(False)
 
-        if is_box_target:
-            print("[BoxPlace] Ascending using reverse lower_traj.")
+        if reverse_descent_place:
+            print("[Place] Ascending using reverse lower_traj.")
             execute_trajectory(self.env, descent_traj[::-1])
-            if not _move_to_home_from_current(self.env):
-                return False, "Could not return home after box placement"
+            if home_traj is not None and len(home_traj) > 0:
+                execute_trajectory(self.env, home_traj)
+            elif not _move_to_home_from_current(self.env, label="[Place]"):
+                return False, "Could not return home after placement"
         else:
             current_q = self.env.get_robot_conf()
             target_retreat_conf = segments[-1][-1]
@@ -1628,14 +1635,14 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
 
         norm_segments = _normalize_segments(traj_tuple)
         release_idx = _place_release_segment_index(self.env, p, norm_segments) if norm_segments else 0
-        is_box_target = _is_box_target_region(self.target_region)
-        if is_box_target:
+        reverse_descent_place = _uses_reverse_descent_place(self.target_region)
+        if reverse_descent_place:
             if not lower_traj:
-                return False, "box place has empty descent trajectory"
-            print("[BoxPlace] Moving to planned box hover.")
+                return False, "place has empty descent trajectory"
+            print("[Place] Moving to planned place hover.")
             if not _move_to_trajectory_start(self.env, lower_traj):
-                return False, "Could not move to planned box hover"
-            print("[BoxPlace] Descending along planned lower_traj.")
+                return False, "Could not move to planned place hover"
+            print("[Place] Descending along planned lower_traj.")
             execute_trajectory(self.env, lower_traj)
         else:
             moved_to_release = _move_to_place_release_direct(self.env, norm_segments, release_idx)
@@ -1673,13 +1680,13 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
                 step_and_record(self.pr, 1)
             target_obj.set_dynamic(False)
 
-        if is_box_target:
-            print("[BoxPlace] Ascending using reverse lower_traj.")
+        if reverse_descent_place:
+            print("[Place] Ascending using reverse lower_traj.")
             execute_trajectory(self.env, lower_traj[::-1])
             if home_traj is not None and len(home_traj) > 0:
                 execute_trajectory(self.env, home_traj)
-            elif not _move_to_home_from_current(self.env):
-                return False, "Could not return home after box placement"
+            elif not _move_to_home_from_current(self.env, label="[Place]"):
+                return False, "Could not return home after placement"
         elif lift_traj is not None and len(lift_traj) > 0:
             current_q = self.env.get_robot_conf()
             target_retreat_conf = lift_traj[-1]
@@ -1703,7 +1710,7 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
             except Exception:
                 execute_trajectory(self.env, [current_q] + lift_traj)
 
-        if (not is_box_target) and home_traj is not None and len(home_traj) > 0:
+        if (not reverse_descent_place) and home_traj is not None and len(home_traj) > 0:
             execute_trajectory(self.env, home_traj)
         return True, "place"
 
@@ -1941,10 +1948,11 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
             tip_offset_world = quaternion_rotate_vector(place_quat, self.mug_tip_offset_local)
             candidate_place_pos = (self.final_place_obj_pos - tip_offset_world).tolist()
             shared_hover = float(os.environ.get("GT_PICK_PLACE_HOVER_Z", "0.30"))
+            placement_hover_extra = 0.05 if self.target_region == "placement_boundary" else 0.0
             candidate_hover_pos = [
                 candidate_place_pos[0],
                 candidate_place_pos[1],
-                candidate_place_pos[2] + max(0.08, shared_hover),
+                candidate_place_pos[2] + max(0.08, shared_hover + placement_hover_extra),
             ]
 
             path_configs = self.env.robot.solve_ik_via_sampling(
@@ -2077,13 +2085,13 @@ class CupboardPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
         if not released_ok:
             return False, f"'{self.object_name}' is still attached after release attempts."
 
-        if _is_box_target_region(self.target_region) and self.place_lower_traj:
-            print("[BoxPlace] Ascending using reverse lower_traj.")
+        if _uses_reverse_descent_place(self.target_region) and self.place_lower_traj:
+            print("[Place] Ascending using reverse lower_traj.")
             for conf in self.place_lower_traj[::-1]:
                 self.env.set_robot_conf(conf)
                 step_and_record(self.pr, 1)
             if not _move_to_home_from_current(self.env):
-                return False, "Could not return home after box placement"
+                return False, "Could not return home after placement"
         else:
             print("Lifting...")
             path_lift = None

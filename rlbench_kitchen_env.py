@@ -1153,7 +1153,10 @@ class RLBenchKitchenEnv:
             else:
                 # --- VERTICAL APPROACH (Top-Down) ---
                 # Existing logic
-                hover_z = pose[2] + top_z_local + 0.12 # Reduced from 0.18
+                if region_name == 'placement_boundary':
+                    hover_z = pose[2] + 0.25
+                else:
+                    hover_z = pose[2] + top_z_local + 0.12
                 place_z = pose[2] + 0.015 
                 
                 target_pos_hover = [pose[0], pose[1], hover_z]
