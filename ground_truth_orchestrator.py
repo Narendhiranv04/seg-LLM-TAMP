@@ -492,8 +492,21 @@ def _is_box_target_region(region_name):
     return region_name in ("box_boundary", "box-inside", "box_storage", "box_inside_fallback")
 
 
+def _is_cupboard_target_region(region_name):
+    return region_name in (
+        "cupboard_boundary",
+        "cupboard_boundary_top",
+        "cupboard_lower",
+        "cupboard_upper",
+    )
+
+
 def _uses_reverse_descent_place(region_name):
-    return _is_box_target_region(region_name) or region_name == "placement_boundary"
+    return (
+        _is_box_target_region(region_name)
+        or _is_cupboard_target_region(region_name)
+        or region_name == "placement_boundary"
+    )
 
 
 def _object_handle(obj):
@@ -1612,7 +1625,6 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
         o, _p, _g, _q1, _q2, traj_tuple = self.pick_action.args
         segments = list(traj_tuple) if isinstance(traj_tuple, tuple) else [traj_tuple]
         approach_traj = segments[0] if len(segments) > 0 else []
-        retreat_traj = segments[1] if len(segments) > 1 else []
 
         execute_trajectory(self.env, approach_traj)
 
@@ -1623,7 +1635,8 @@ class PDDLPrimitiveTransferExecutor(PrimitiveTransferExecutorBase):
         step_and_record(self.pr, 10)
         self.env.gripper.grasp(target_obj)
 
-        execute_trajectory(self.env, retreat_traj)
+        print("[Pick] Retreating using reverse approach_traj.")
+        execute_trajectory(self.env, approach_traj[::-1])
         return True, "pick"
 
     def _place_box(self):

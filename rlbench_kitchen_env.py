@@ -386,7 +386,7 @@ class RLBenchKitchenEnv:
         except Exception:
             is_mug = False
 
-        def sample_clear_xy(min_x, max_x, min_y, max_y, grid_n, occ_pad_xy, occ_pad_z):
+        def sample_clear_xy(min_x, max_x, min_y, max_y, grid_n, occ_pad_xy, occ_pad_z, mode="best"):
             xs = np.linspace(min_x, max_x, grid_n).tolist()
             ys = np.linspace(min_y, max_y, grid_n).tolist()
             candidates = [(float(x), float(y)) for x in xs for y in ys]
@@ -450,6 +450,10 @@ class RLBenchKitchenEnv:
 
                 # Shuffle to avoid deterministic tie bias in symmetric scenes.
                 np.random.shuffle(candidates)
+                if mode == "top_random":
+                    scored = sorted(candidates, key=_clearance_score, reverse=True)
+                    top_n = max(1, min(len(scored), int(os.environ.get("CLEAR_XY_TOP_RANDOM", "8"))))
+                    return scored[int(np.random.randint(0, top_n))]
                 return max(candidates, key=_clearance_score)
 
             return (
@@ -534,9 +538,10 @@ class RLBenchKitchenEnv:
                 max_x,
                 min_y,
                 max_y,
-                max(3, int(os.environ.get("CUPBOARD_LOWER_SAMPLE_GRID", "4"))),
+                max(3, int(os.environ.get("CUPBOARD_LOWER_SAMPLE_GRID", "5"))),
                 float(os.environ.get("CUPBOARD_LOWER_OCCUPANCY_PAD_XY", "0.04")),
                 float(os.environ.get("CUPBOARD_LOWER_OCCUPANCY_PAD_Z", "0.20")),
+                mode="top_random",
             )
 
             # Keep the previous lower-cupboard Z behavior; only choose clearer XY.
