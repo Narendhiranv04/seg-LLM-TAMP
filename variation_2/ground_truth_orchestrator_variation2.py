@@ -11,7 +11,7 @@ Sequence:
 3. Pick mug on box -> placement_boundary
 4. Slide open box lid
 5. Pick grocery in box -> cupboard_boundary
-6. Pick both table mugs (2) -> box_boundary
+6. Pick both table mugs (2) -> box-inside
 """
 import os
 import sys
@@ -173,7 +173,7 @@ def _select_runtime_table_grocery(env, exclude_names=None):
         in_cupboard = _is_in_region(env, obj, "cupboard_boundary") or _is_in_region(
             env, obj, "cupboard_boundary_top"
         )
-        in_box = _is_in_region(env, obj, "box_boundary")
+        in_box = _is_in_region(env, obj, "box-inside")
 
         # Best target for Task 5
         if in_table and (not in_cupboard):
@@ -204,7 +204,7 @@ def _select_runtime_box_grocery(env, exclude_names=None):
         h = _obj_handle(obj)
         if (h is not None) and (h in excluded):
             continue
-        if _is_in_region(env, obj, "box_boundary"):
+        if _is_in_region(env, obj, "box-inside"):
             in_box.append(name)
         else:
             in_cupboard = _is_in_region(env, obj, "cupboard_boundary") or _is_in_region(
@@ -217,7 +217,7 @@ def _select_runtime_box_grocery(env, exclude_names=None):
         return in_box[0]
 
     # Fallback: nearest non-cupboard grocery to box center.
-    box_center = _region_center(env, "box_boundary")
+    box_center = _region_center(env, "box-inside")
     if box_center is not None and remaining:
         return min(
             remaining,
@@ -253,7 +253,7 @@ def _select_runtime_table_mugs(env, preferred_names=None, max_count=2):
         in_cupboard = _is_in_region(env, obj, "cupboard_boundary") or _is_in_region(
             env, obj, "cupboard_boundary_top"
         )
-        in_box = _is_in_region(env, obj, "box_boundary")
+        in_box = _is_in_region(env, obj, "box-inside")
 
         if (in_table or in_placement or near_table) and (not in_cupboard) and (not in_box):
             selected.append(name)
@@ -278,9 +278,9 @@ def _select_runtime_table_mugs(env, preferred_names=None, max_count=2):
 
 def _compute_box_slot_poses(env, mug_names):
     """
-    Compute evenly spaced, non-overlapping mug target poses in box_boundary.
+    Compute evenly spaced, non-overlapping mug target poses in box-inside.
     """
-    box_region = env.regions.get("box_boundary") or env.regions.get("box-inside")
+    box_region = env.regions.get("box-inside")
     if box_region is None:
         return {}
 
@@ -349,7 +349,7 @@ def _box_slot_candidates(env, slot_pose):
     if slot_pose is None or len(slot_pose) < 7:
         return []
 
-    box_region = env.regions.get("box_boundary") or env.regions.get("box-inside")
+    box_region = env.regions.get("box-inside")
     if box_region is None:
         return [list(slot_pose[:7])]
 
@@ -410,12 +410,11 @@ def _install_box_slot_overrides(env, mug_name, slot_pose):
         return prev, prev_only
 
     override_map = dict(prev) if isinstance(prev, dict) else {}
-    override_map[(mug_name, "box_boundary")] = candidates
     override_map[(mug_name, "box-inside")] = candidates
     override_map[mug_name] = candidates
     env._stable_pose_overrides = override_map
 
-    exclusive_keys = [(mug_name, "box_boundary"), (mug_name, "box-inside")]
+    exclusive_keys = [(mug_name, "box-inside")]
     if prev_only is True:
         env._stable_pose_overrides_only = True
     elif isinstance(prev_only, dict):
@@ -495,44 +494,25 @@ def _force_place_mug_in_box_slot(env, pr, mug_name, pose7):
     for _ in range(15):
         base.step_and_record(pr, 1)
 
-    in_box = _is_in_region(env, mug, "box_boundary", tol=0.04) or _is_in_region(
-        env, mug, "box-inside", tol=0.04
-    )
+    in_box = _is_in_region(env, mug, "box-inside", tol=0.04)
     return bool(in_box)
 
 
-def _run_table_mug_to_box_with_fallback(env, pr, mug_name, task_idx, slot_pose):
+def _run_table_mug_to_box(env, pr, mug_name, task_idx, slot_pose):
     """
-    Try mug->box via PDDL first; then try easier inside-box region.
+    Try mug->box-inside via PDDL once.
     Do NOT snap/teleport mug pose after placement.
     """
     task_label = f"Task {task_idx}: Table Mug -> Box ({mug_name})"
     prev_overrides = _install_box_slot_overrides(env, mug_name, slot_pose)
 
     try:
-        # Attempt 1: strict box boundary region
-        success = base.run_standard_pick_place(
-            env,
-            object_name=mug_name,
-            target_region="box_boundary",
-            task_name=task_label,
-        )
-        if success:
-            return True
-
-        print(f"[Fallback] {mug_name}: box_boundary planning failed, trying box-inside region.")
-        # Attempt 2: inside-box region (often easier IK/sample pose)
-        success = base.run_standard_pick_place(
+        return base.run_standard_pick_place(
             env,
             object_name=mug_name,
             target_region="box-inside",
-            task_name=f"{task_label} [fallback box-inside]",
+            task_name=task_label,
         )
-        if success:
-            return True
-
-        print(f"[Fallback] {mug_name}: no valid PDDL plan for both box regions.")
-        return False
     finally:
         _restore_overrides(env, prev_overrides)
 
@@ -542,7 +522,7 @@ def _classify_variation_objects(env):
     mug_in_cupboard_candidates = ["mug3", "mug1", "mug2", "mug4"]
     grocery_candidates = ["soup", "spam", "mustard", "sugar", "crackers"]
 
-    mug_on_box = _select_object_by_region(env, mug_on_box_candidates, "box_boundary")
+    mug_on_box = _select_object_by_region(env, mug_on_box_candidates, "box-inside")
     mug_in_cupboard = _select_object_by_region(env, mug_in_cupboard_candidates, "cupboard_boundary")
 
     groceries = _discover_unique_objects(env, grocery_candidates)
@@ -552,7 +532,7 @@ def _classify_variation_objects(env):
 
     for name in groceries:
         obj = env.get_object(name)
-        if _is_in_region(env, obj, "box_boundary"):
+        if _is_in_region(env, obj, "box-inside"):
             grocery_in_box = name
             break
 
@@ -574,7 +554,7 @@ def _classify_variation_objects(env):
 
     # Robust fallbacks if region checks are noisy.
     if grocery_in_box is None and groceries:
-        box_center = _region_center(env, "box_boundary")
+        box_center = _region_center(env, "box-inside")
         if box_center is not None:
             grocery_in_box = min(
                 groceries,
@@ -820,10 +800,10 @@ def main():
     task_idx = 6
     for mug_name in runtime_table_mugs:
         slot_pose = box_slots.get(mug_name)
-        success = _run_table_mug_to_box_with_fallback(
+        success = _run_table_mug_to_box(
             env, pr, mug_name, task_idx, slot_pose
         )
-        results.append((f"Task {task_idx}: {mug_name} table -> box_boundary", success))
+        results.append((f"Task {task_idx}: {mug_name} table -> box-inside", success))
         base.go_home(env)
         task_idx += 1
 

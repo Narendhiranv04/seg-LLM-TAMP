@@ -93,32 +93,25 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
     def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
         obj_name = p_action.args[0]
         target_region = normalize_region_name(pl_action.args[1])
+        gt_target_region = (
+            BOX_INSIDE_FALLBACK_REGION
+            if target_region == BOX_STORAGE_REGION
+            else target_region
+        )
         print(f"[KITCHEN-BUNDLE] --- Starting GT Transfer Ritual: {obj_name} -> {target_region} ---")
         
         # 1. Pre-action Home
         self.executor.go_home()
         
-        task_label = f"LLM Bundle: {obj_name} -> {target_region}"
+        task_label = f"LLM Bundle: {obj_name} -> {gt_target_region}"
         
         _ensure_kitchen_gt_imports()
         if create_primitive_transfer_executor is None:
             return False, "GT executors not available. Check ground_truth_orchestrator imports."
 
-        gt_executor = create_primitive_transfer_executor(self.env, obj_name, target_region, task_name=task_label)
+        gt_executor = create_primitive_transfer_executor(self.env, obj_name, gt_target_region, task_name=task_label)
         
-        # Attempt primary execution
         success = gt_executor.execute_all()
-        
-        # Fallback logic for box placements (mirroring GT)
-        if not success and target_region == BOX_STORAGE_REGION:
-            print(f"[Fallback] {obj_name}: box_storage failed, trying box_inside_fallback region.")
-            gt_executor = create_primitive_transfer_executor(
-                self.env,
-                obj_name,
-                BOX_INSIDE_FALLBACK_REGION,
-                task_name=f"{task_label} [fallback box_inside_fallback]",
-            )
-            success = gt_executor.execute_all()
         
         # Post-action Home
         self.executor.go_home()

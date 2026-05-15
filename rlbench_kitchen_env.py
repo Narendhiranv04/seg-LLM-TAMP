@@ -123,8 +123,8 @@ class RLBenchKitchenEnv:
         self.regions = RegionAliasMap()
         if self.table is not None:
             self.regions['table'] = self.table
-        if self.box is not None:
-            self.regions[BOX_INSIDE_FALLBACK_REGION] = self.box
+        if self.box_boundary is not None:
+            self.regions[BOX_INSIDE_FALLBACK_REGION] = self.box_boundary
         if self.groceries_boundary is not None:
             self.regions['groceries_boundary'] = self.groceries_boundary
         if self.placement_boundary is not None:
@@ -165,7 +165,7 @@ class RLBenchKitchenEnv:
         _register('box_base', self.box)
         _register(BOX_STORAGE_REGION, self.box_boundary)
         _register(BOX_LID_TOP_REGION, self.box_lid)
-        _register(BOX_INSIDE_FALLBACK_REGION, self.box)
+        _register(BOX_INSIDE_FALLBACK_REGION, self.box_boundary)
         _register('cupboard_lower', self.cupboard_boundary)
         _register('cupboard_upper', self.cupboard_boundary_top)
         # Mug aliases
@@ -980,17 +980,17 @@ class RLBenchKitchenEnv:
                 q = [cj*sc - sj*cs, cj*ss + sj*cc, cj*cs - sj*sc, cj*cc + sj*ss]
                 return q
 
-            # Check if object is inside box_boundary
-            in_box_boundary = False
-            if getattr(self, 'box_boundary', None) is not None:
-                # Check if obj center is inside box_boundary bbox
+            # Check if object is inside the executable box-inside region.
+            in_box_region = False
+            box_inside_region = self.regions.get(BOX_INSIDE_FALLBACK_REGION)
+            if box_inside_region is not None:
                 o_pos = obj.get_position()
-                bb_min_x, bb_max_x, bb_min_y, bb_max_y, bb_min_z, bb_max_z = self._get_world_bounding_box(self.box_boundary)
+                bb_min_x, bb_max_x, bb_min_y, bb_max_y, bb_min_z, bb_max_z = self._get_world_bounding_box(box_inside_region)
                 if (bb_min_x <= o_pos[0] <= bb_max_x) and (bb_min_y <= o_pos[1] <= bb_max_y) and (bb_min_z <= o_pos[2] <= bb_max_z):
-                    in_box_boundary = True
-                    # object detected inside box_boundary, restricting grasp orientation
+                    in_box_region = True
+                    # object detected inside box-inside, restricting grasp orientation
 
-            if in_box_boundary:
+            if in_box_region:
                  # User request: aligned with x axis, no orientation/angle in xy axis
                  # We'll use 0, pi/2, pi, 3pi/2 to cover both alignments (fingers along X or Y)
                  angles = [0, np.pi/2, np.pi, 3*np.pi/2]
@@ -1037,12 +1037,13 @@ class RLBenchKitchenEnv:
                     base_x, base_y = planned_pose[0], planned_pose[1]
 
                 for dx, dy in xy_offsets:
-                    target_pos = [base_x + dx, base_y + dy, target_z]
-
-                    # Adjust hover height for box boundary to ensure clearance
-                    hover_offset = 0.30 if in_box_boundary else 0.25
+                    if in_box_region:
+                        target_pos = [live_pos[0], live_pos[1], target_z]
+                        hover_pos = [live_pos[0], live_pos[1], live_pos[2] + 0.40]
+                    else:
+                        target_pos = [base_x + dx, base_y + dy, target_z]
+                        hover_pos = [target_pos[0], target_pos[1], target_pos[2] + 0.25]
                     # Keep approach strictly vertical in Cartesian space.
-                    hover_pos = [target_pos[0], target_pos[1], target_pos[2] + hover_offset]
 
                     for i, grasp_rot in enumerate(grasp_quats):
                         try:
@@ -1106,7 +1107,6 @@ class RLBenchKitchenEnv:
             region_name = normalize_region_name(region_name)
             is_cupboard = region_name in CUPBOARD_TARGET_REGIONS
             is_box_region = region_name in {BOX_STORAGE_REGION, BOX_INSIDE_FALLBACK_REGION}
-            is_box_boundary = region_name == BOX_STORAGE_REGION
             
             min_x, max_x, min_y, max_y, min_z, max_z = obj.get_bounding_box()
             top_z_local = max_z
@@ -1158,7 +1158,9 @@ class RLBenchKitchenEnv:
             else:
                 # --- VERTICAL APPROACH (Top-Down) ---
                 # Existing logic
-                if region_name == 'placement_boundary':
+                if is_box_region:
+                    hover_z = pose[2] + 0.40
+                elif region_name == 'placement_boundary':
                     hover_z = pose[2] + 0.35
                 else:
                     hover_z = pose[2] + top_z_local + 0.12

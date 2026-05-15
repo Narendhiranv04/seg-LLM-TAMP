@@ -52,7 +52,7 @@ PLANNER_HIDDEN_REGIONS = (BOX_INSIDE_FALLBACK_REGION,)
 CANONICAL_REGION_SCENE_OBJECTS = {
     "box_storage": "box_boundary",
     "box_lid_top": "box_lid",
-    "box_inside_fallback": "box_base",
+    "box_inside_fallback": "box_boundary",
     "cupboard_lower": "cupboard_boundary",
     "cupboard_upper": "cupboard_boundary_top",
     "inside_grill": "grill_boundary",
@@ -67,7 +67,7 @@ REGION_SEMANTICS = {
     "box_storage": "inside-box storage target for putting objects into the box",
     "groceries_boundary": "groceries/source area on the table",
     "box_lid_top": "support surface on top of the box lid for objects resting on the lid",
-    "box_inside_fallback": "internal broad box evidence; not a planner target",
+    "box_inside_fallback": "inside-box execution target backed by box_boundary",
     "inside_grill": "inside-grill containment area represented by the scene object grill_boundary",
     "prep_area": "preparation area where uncooked meat starts",
     "plate-top": "top surface of the plate for placing cooked meat",

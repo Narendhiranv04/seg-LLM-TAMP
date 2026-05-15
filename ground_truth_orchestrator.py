@@ -4,7 +4,7 @@ Performs all 6 tasks in sequence:
 1. Pick mug3 from cupboard -> placement_boundary
 2. Pick 5 groceries from table -> cupboard_boundary
 3. Pick mug1 from groceries_boundary -> placement_boundary
-4. Pick mug2 from box_boundary -> placement_boundary
+4. Pick mug2 from box-inside -> placement_boundary
 5. Slide open box lid
 6. Pick mug4 from box_inside -> placement_boundary
 """
@@ -316,6 +316,53 @@ def _grasped_object_names(env):
     return names
 
 
+def _format_xyz(pos):
+    if pos is None:
+        return "None"
+    return "[" + ", ".join(f"{float(v):.3f}" for v in pos[:3]) + "]"
+
+
+def _log_height_trace(env, task_name, object_name, stage_label, target_region="", status=""):
+    """Print a stable one-line height diagnostic for manual log inspection."""
+    obj_pos = None
+    obj = env.get_object(object_name) if object_name else None
+    if obj is not None:
+        try:
+            obj_pos = list(obj.get_position())
+        except Exception:
+            obj_pos = None
+
+    tip_pos = None
+    try:
+        try:
+            tip = env.robot.get_tip()
+        except Exception:
+            tip = env.robot.arm.get_tip()
+        tip_pos = list(tip.get_position())
+    except Exception:
+        try:
+            tip_pos = list(env.robot.get_position())
+        except Exception:
+            tip_pos = None
+
+    grasped_names = _grasped_object_names(env)
+    obj_z = "None" if obj_pos is None else f"{float(obj_pos[2]):.3f}"
+    tip_z = "None" if tip_pos is None else f"{float(tip_pos[2]):.3f}"
+    print(
+        "[HeightTrace] "
+        f"task={task_name!r} "
+        f"stage={stage_label} "
+        f"status={status or 'sample'} "
+        f"object={object_name} "
+        f"target_region={target_region or ''} "
+        f"object_z={obj_z} "
+        f"object_pos={_format_xyz(obj_pos)} "
+        f"tip_z={tip_z} "
+        f"tip_pos={_format_xyz(tip_pos)} "
+        f"grasped={grasped_names}"
+    )
+
+
 def _move_to_conf_via_high_hover(env, target_conf):
     """
     Move to target joint config via a high-Z Cartesian hover path.
@@ -542,7 +589,7 @@ def _move_to_home_from_current(env, label="[Place]"):
 
 
 def _is_box_target_region(region_name):
-    return region_name in ("box_boundary", "box-inside", "box_storage", "box_inside_fallback")
+    return region_name in ("box-inside", "box_inside_fallback")
 
 
 def _is_cupboard_target_region(region_name):
@@ -1372,12 +1419,28 @@ class PrimitiveTransferExecutorBase:
                 f"[PrimitiveExecutor] FAIL  {stage_number}/{total_stages}: "
                 f"{action_name} ({stage_label}) | {self.object_name} | {msg}"
             )
+            _log_height_trace(
+                self.env,
+                self.task_name,
+                self.object_name,
+                stage_label,
+                target_region=self.target_region,
+                status="fail",
+            )
             return False, msg
 
         self.stage_index += 1
         print(
             f"[PrimitiveExecutor] DONE  {stage_number}/{total_stages}: "
             f"{action_name} ({stage_label}) | {self.object_name}"
+        )
+        _log_height_trace(
+            self.env,
+            self.task_name,
+            self.object_name,
+            stage_label,
+            target_region=self.target_region,
+            status="done",
         )
         return True, action_name
 
@@ -2221,8 +2284,8 @@ def create_primitive_transfer_executor(env, object_name, target_region, task_nam
                 rz + r_min_z - 0.15 <= p[2] <= rz + r_max_z + 0.15)
 
     def _log_transfer_route(caller_name, executor_name, box_mode):
-        to_box = target_region in ['box_boundary', 'box-inside']
-        in_box = _is_in_region_local(pos, 'box_boundary')
+        to_box = _is_box_target_region(target_region)
+        in_box = _is_in_region_local(pos, 'box-inside')
         scene_file = os.environ.get("KITCHEN_SCENE_FILE", "")
         scene_name = os.path.basename(scene_file) if scene_file else "default"
         pos_text = "None" if pos is None else "[" + ", ".join(f"{float(v):.3f}" for v in pos[:3]) + "]"
@@ -2235,7 +2298,7 @@ def create_primitive_transfer_executor(env, object_name, target_region, task_nam
             f"object={object_name} "
             f"target_region={target_region} "
             f"object_pos={pos_text} "
-            f"in_box_boundary={in_box} "
+            f"in_box_inside={in_box} "
             f"target_is_box={to_box} "
             f"box_mode={bool(box_mode)} "
             f"pick_impl={'_pick_box' if box_mode else '_pick_standard'} "
@@ -2252,8 +2315,8 @@ def create_primitive_transfer_executor(env, object_name, target_region, task_nam
             env, object_name, target_region, task_name=task_name
         )
 
-    to_box = target_region in ['box_boundary', 'box-inside']
-    in_box = _is_in_region_local(pos, 'box_boundary')
+    to_box = _is_box_target_region(target_region)
+    in_box = _is_in_region_local(pos, 'box-inside')
 
     if in_box or to_box:
         _log_transfer_route(
@@ -2313,8 +2376,8 @@ def _log_pick_place_route(env, caller_name, object_name, target_region, task_nam
         f"object={object_name} "
         f"target_region={target_region} "
         f"object_pos={pos_text} "
-        f"in_box_boundary={_is_in_region_local(pos, 'box_boundary')} "
-        f"target_is_box={target_region in ['box_boundary', 'box-inside']} "
+        f"in_box_inside={_is_in_region_local(pos, 'box-inside')} "
+        f"target_is_box={_is_box_target_region(target_region)} "
         f"box_mode={bool(box_mode)} "
         f"pick_impl={'_pick_box' if box_mode else '_pick_standard'} "
         f"place_impl={'_place_box' if box_mode else '_place_standard'}"
@@ -2354,8 +2417,8 @@ def run_cupboard_pick_place(env, object_name, target_region, task_name=""):
         f"object={object_name} "
         f"target_region={target_region} "
         f"object_pos={pos_text} "
-        "in_box_boundary=False "
-        f"target_is_box={target_region in ['box_boundary', 'box-inside']} "
+        "in_box_inside=False "
+        f"target_is_box={_is_box_target_region(target_region)} "
         "box_mode=False "
         "pick_impl=CupboardPrimitiveTransferExecutor._pick "
         "place_impl=CupboardPrimitiveTransferExecutor._place"
@@ -2387,11 +2450,13 @@ def run_open_box(env, task_name=""):
     obj = env.get_object('box_lid')
     if obj is None:
         print("ERROR: box_lid not found.")
+        _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
         return False
 
     is_blocked, blocker = check_object_blocked_by_mug('box_lid')
     if is_blocked:
         print(f"ERROR: Cannot open box lid - '{blocker}' is blocking it")
+        _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
         return False
 
     pos_before = list(obj.get_position())
@@ -2417,6 +2482,9 @@ def run_open_box(env, task_name=""):
             if success:
                 print(f"Task '{task_name}' complete!")
                 print(f"[PrimitiveExecutor] DONE  1/1: open-lid (open-lid) | {object_name}")
+                _log_height_trace(env, task_name, object_name, "open-lid", status="done")
+            else:
+                _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
             return success
 
         print("Computing grasp trajectory...")
@@ -2428,6 +2496,7 @@ def run_open_box(env, task_name=""):
 
         if not path_to_hover:
             print("ERROR: Could not plan motion to hover")
+            _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
             return False
 
         print("Moving to hover...")
@@ -2448,6 +2517,7 @@ def run_open_box(env, task_name=""):
 
         if not traj_open:
             print("ERROR: Failed to compute slide trajectory")
+            _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
             return False
 
         print("Sliding lid open...")
@@ -2495,16 +2565,19 @@ def run_open_box(env, task_name=""):
                 f"ERROR: Lid didn't slide open enough "
                 f"(XY displacement: {displacement_xy:.3f}m, required: {required_open_xy:.3f}m)"
             )
+            _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
             return False
 
         print(f"✓ Validation passed: Lid slid {displacement_xy:.3f}m")
         print(f"Task '{task_name}' complete!")
         print(f"[PrimitiveExecutor] DONE  1/1: open-lid (open-lid) | {object_name}")
+        _log_height_trace(env, task_name, object_name, "open-lid", status="done")
         return True
 
     except Exception as e:
         print(f"[PrimitiveExecutor] FAIL  1/1: open-lid (open-lid) | {object_name} | {e}")
         print(f"ERROR: {e}")
+        _log_height_trace(env, task_name, object_name, "open-lid", status="fail")
         import traceback
         traceback.print_exc()
         return False
@@ -2622,7 +2695,7 @@ def main():
         task_num += 1
 
     # ============================================
-    # TASK 3: Pick mug2 from box_boundary -> placement_boundary
+    # TASK 3: Pick mug2 from box-inside -> placement_boundary
     # ============================================
     success = run_box_pick_place(
         env,
