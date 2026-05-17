@@ -63,6 +63,7 @@ class LLMPipelineConfig:
     remote_planner_url: str = ''
     task_family: str = 'kitchen'
     scene_path: str = ''
+    scene_state_trace: bool = False
     
     # NEW Multimodal & Prompting Flags
     enable_vision: bool = False
@@ -211,6 +212,8 @@ class LLMOnlyReplanningPipeline:
             self.executor.set_step_callback(self._on_sim_step)
         if hasattr(self.executor, 'set_action_start_callback'):
             self.executor.set_action_start_callback(self._on_action_start)
+        if hasattr(self.executor, 'set_scene_state_trace_enabled'):
+            self.executor.set_scene_state_trace_enabled(self.config.scene_state_trace)
 
         if self.planner is None:
             model_alias, model_name = self.config.resolve_model_name()

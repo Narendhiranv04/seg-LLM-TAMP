@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import math
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PDDLSTREAM_DIR = os.path.join(ROOT_DIR, 'pddlstream')
@@ -19,13 +20,14 @@ import numpy as np
 from pddlstream.algorithms.meta import solve
 from pddlstream.language.constants import And, PDDLProblem
 
-from llm_pipeline.pipeline_types import DirectAction, FailureEvent, FailureStage, FailureSource
+from llm_pipeline.pipeline_types import DirectAction, FailureEvent, FailureLayer, FailureStage, FailureSource
 from llm_pipeline.region_aliases import (
     BOX_INSIDE_FALLBACK_REGION,
     BOX_STORAGE_REGION,
     CUPBOARD_TARGET_REGIONS,
     normalize_region_name,
 )
+from llm_pipeline.grill_geometry import derive_grill_semantic_facts, infer_grill_lid_open
 from vlm_pipeline.vlm_executor_v2 import (
     VLMExecutorV2,
     _normalize_segments,
@@ -38,6 +40,7 @@ compute_tip_attachment = None
 update_attached_pose = None
 create_primitive_transfer_executor = None
 run_open_box = None
+kitchen_gt_module = None
 
 
 def _ensure_kitchen_gt_imports() -> None:
@@ -46,20 +49,16 @@ def _ensure_kitchen_gt_imports() -> None:
     global update_attached_pose
     global create_primitive_transfer_executor
     global run_open_box
+    global kitchen_gt_module
     if create_primitive_transfer_executor is not None and run_open_box is not None:
         return
-    from ground_truth_orchestrator import (
-        quaternion_rotate_vector as _quaternion_rotate_vector,
-        compute_tip_attachment as _compute_tip_attachment,
-        update_attached_pose as _update_attached_pose,
-        create_primitive_transfer_executor as _create_primitive_transfer_executor,
-        run_open_box as _run_open_box,
-    )
-    quaternion_rotate_vector = _quaternion_rotate_vector
-    compute_tip_attachment = _compute_tip_attachment
-    update_attached_pose = _update_attached_pose
-    create_primitive_transfer_executor = _create_primitive_transfer_executor
-    run_open_box = _run_open_box
+    import ground_truth_orchestrator as _gt
+    kitchen_gt_module = _gt
+    quaternion_rotate_vector = _gt.quaternion_rotate_vector
+    compute_tip_attachment = _gt.compute_tip_attachment
+    update_attached_pose = _gt.update_attached_pose
+    create_primitive_transfer_executor = _gt.create_primitive_transfer_executor
+    run_open_box = _gt.run_open_box
 
 
 @dataclass
@@ -70,6 +69,16 @@ class PrimitiveExecutionOutcome:
     held_object: Optional[str] = None
     last_failure_event: Optional[FailureEvent] = None
     error_message: Optional[str] = None
+
+
+@dataclass
+class BundleExecutionOutcome:
+    consumed: int
+    success: bool
+    error_message: str = ""
+    failure_event: Optional[FailureEvent] = None
+    completed_actions: List[str] = field(default_factory=list)
+    held_object: Optional[str] = None
 
 
 class AbstractBundlingHandler:
@@ -87,10 +96,13 @@ class AbstractBundlingHandler:
     def execute_close(self, c_action: DirectAction) -> Tuple[bool, str]:
         raise NotImplementedError
 
+    def _sync_external_step_callback(self) -> None:
+        return None
+
 
 class KitchenBundlingHandler(AbstractBundlingHandler):
     """Bundling rituals for the Kitchen scene."""
-    def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
+    def create_transfer_executor(self, p_action: DirectAction, pl_action: DirectAction):
         obj_name = p_action.args[0]
         target_region = normalize_region_name(pl_action.args[1])
         gt_target_region = (
@@ -99,26 +111,30 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
             else target_region
         )
         print(f"[KITCHEN-BUNDLE] --- Starting GT Transfer Ritual: {obj_name} -> {target_region} ---")
-        
-        # 1. Pre-action Home
         self.executor.go_home()
-        
+
         task_label = f"LLM Bundle: {obj_name} -> {gt_target_region}"
-        
+
         _ensure_kitchen_gt_imports()
+        self._sync_external_step_callback()
         if create_primitive_transfer_executor is None:
-            return False, "GT executors not available. Check ground_truth_orchestrator imports."
+            return None, target_region, gt_target_region, "GT executors not available. Check ground_truth_orchestrator imports."
 
         gt_executor = create_primitive_transfer_executor(self.env, obj_name, gt_target_region, task_name=task_label)
-        
+        return gt_executor, target_region, gt_target_region, ""
+
+    def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
+        gt_executor, target_region, _, err = self.create_transfer_executor(p_action, pl_action)
+        obj_name = p_action.args[0]
+        if gt_executor is None:
+            return False, err
+
         success = gt_executor.execute_all()
-        
-        # Post-action Home
         self.executor.go_home()
-        
+
         if not success:
             return False, f"Transfer failed for {obj_name} to {target_region}"
-            
+
         print(f"[KITCHEN-BUNDLE] ✓ Transfer Complete.")
         return True, ""
 
@@ -127,6 +143,7 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
         self.executor.go_home()
         
         _ensure_kitchen_gt_imports()
+        self._sync_external_step_callback()
         if run_open_box is None:
             return False, "run_open_box not available."
             
@@ -142,6 +159,17 @@ class KitchenBundlingHandler(AbstractBundlingHandler):
 
     def execute_close(self, c_action: DirectAction) -> Tuple[bool, str]:
         return False, "Close is not supported for kitchen scenes."
+
+    def _sync_external_step_callback(self) -> None:
+        if kitchen_gt_module is None:
+            return
+        try:
+            # Debug scene-state visualization is checkpoint-driven. Leaving the
+            # GT step callback connected makes segmentation recompute during
+            # every trajectory step, which is far too slow for replay.
+            kitchen_gt_module.STEP_CALLBACK = None
+        except Exception:
+            pass
 
 
 class GrillBundlingHandler(AbstractBundlingHandler):
@@ -178,44 +206,52 @@ class GrillBundlingHandler(AbstractBundlingHandler):
             try:
                 self.grill_gt._capture_handle_anchor(self.env)
             except Exception: pass
+            self._sync_external_step_callback()
                 
         except Exception as e:
             print(f"[GRILL-BUNDLE] Warning: Could not initialize grill GT module: {e}")
             self.grill_gt = None
 
-    def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
+    def create_transfer_executor(self, p_action: DirectAction, pl_action: DirectAction):
+        self._sync_external_step_callback()
         obj_name = p_action.args[0]
         target_region = normalize_region_name(pl_action.args[1])
         gt_target_region = "grill-top" if target_region == "inside_grill" else target_region
         is_plate = "plate" in obj_name.lower()
         print(f"[GRILL-BUNDLE] --- Starting GT Transfer Ritual: {obj_name} -> {target_region} ---")
-        
-        # 1. Pre-action Home
         self.executor.go_home()
-        
+
         if self.grill_gt is None:
-            return False, "Grill GT not available"
-            
+            return None, target_region, gt_target_region, "Grill GT not available"
+
         target_obj = self.env.get_object(obj_name)
         if target_obj is None:
-            return False, f"Object {obj_name} not found"
-            
-        # Dynamically compute target pose using _region_slot_pose
+            return None, target_region, gt_target_region, f"Object {obj_name} not found"
+
         count = self.placed_counts.get(gt_target_region, 0)
         target_pose = None
         if not is_plate:
             target_pose = self.grill_gt._region_slot_pose(self.env, target_obj, gt_target_region, slot_idx=count, slot_count=3)
             self.placed_counts[gt_target_region] = count + 1
-            
-        success = self.grill_gt.run_pick_place(
+
+        gt_executor = self.grill_gt.GrillPrimitiveTransferExecutor(
             self.env,
             self.env.pr,
             obj_name=obj_name,
             target_region=gt_target_region,
             task_name=f"LLM Bundle: {obj_name} -> {target_region}",
             is_plate=is_plate,
-            target_pose=target_pose
+            target_pose=target_pose,
         )
+        return gt_executor, target_region, gt_target_region, ""
+
+    def execute_transfer(self, p_action: DirectAction, pl_action: DirectAction) -> Tuple[bool, str]:
+        gt_executor, target_region, _, err = self.create_transfer_executor(p_action, pl_action)
+        obj_name = p_action.args[0]
+        if gt_executor is None:
+            return False, err
+
+        success = gt_executor.execute_all()
         
         self.executor.go_home()
         
@@ -234,6 +270,7 @@ class GrillBundlingHandler(AbstractBundlingHandler):
     def _execute_lid_motion(self, direction: str, label: str) -> Tuple[bool, str]:
         print(f"[GRILL-BUNDLE] --- Starting GT {label} Ritual ---")
         self.executor.go_home()
+        self._sync_external_step_callback()
         
         if self.grill_gt is None:
             return False, "Grill GT not available"
@@ -258,6 +295,17 @@ class GrillBundlingHandler(AbstractBundlingHandler):
         print(f"[GRILL-BUNDLE] ✓ {label} Complete.")
         return True, ""
 
+    def _sync_external_step_callback(self) -> None:
+        if self.grill_gt is None:
+            return
+        try:
+            # Debug scene-state visualization is checkpoint-driven. Leaving the
+            # GT step callback connected makes segmentation recompute during
+            # every trajectory step, which is far too slow for replay.
+            self.grill_gt.STEP_CALLBACK = None
+        except Exception:
+            pass
+
 
 class UnifiedActionBundler:
     """Orchestrates bundling across scenes."""
@@ -270,11 +318,15 @@ class UnifiedActionBundler:
         else:
             self.handler = KitchenBundlingHandler(executor)
 
-    def try_execute_bundle(self, actions: List[DirectAction], index: int) -> Tuple[int, bool, str, Optional[FailureEvent]]:
-        """
-        Attempts to find and execute a bundle starting at 'index'.
-        Returns: (num_consumed, success, error_message, failure_event)
-        """
+    def try_execute_bundle(
+        self,
+        actions: List[DirectAction],
+        index: int,
+        failure_checker=None,
+        pre_action_checks_enabled: bool = True,
+        post_action_checks_enabled: bool = True,
+    ) -> BundleExecutionOutcome:
+        """Attempts to find and execute a bundle starting at ``index``."""
         action = actions[index]
         
         # 1. Pattern: [Move, Pick, Move, Place] -> Transfer
@@ -283,46 +335,430 @@ class UnifiedActionBundler:
             next2 = actions[index + 2]
             next3 = actions[index + 3]
             if next1.action_name == 'pick' and next2.action_name == 'move' and next3.action_name == 'place':
-                # Check if it's the same object
                 if next1.args[0] == next3.args[0]:
-                    ok, err = self.handler.execute_transfer(next1, next3)
-                    failure = None
-                    if not ok:
-                        failure = FailureEvent(
-                            failure_id="TAMP_EXECUTION_ERROR",
-                            stage=FailureStage.AFTER_EXECUTION,
-                            source=FailureSource.EXECUTOR,
-                            action=f"{next1.action_name}({next1.args[0]}) -> {next3.action_name}({next3.args[1]})",
-                            evidence={"error": err, "target": next3.args[1], "object": next1.args[0]},
-                            should_replan=True,
-                            message=err
-                        )
-                    return 4, ok, err, failure
+                    return self._execute_transfer_bundle(
+                        actions[index:index + 4],
+                        start_index=index,
+                        total_action_count=len(actions),
+                        failure_checker=failure_checker,
+                        pre_action_checks_enabled=pre_action_checks_enabled,
+                        post_action_checks_enabled=post_action_checks_enabled,
+                    )
 
         # 2. Pattern: [Move, Open/Close] -> Lid motion
         if action.action_name == 'move' and (index + 1) < len(actions):
             next1 = actions[index + 1]
             if next1.action_name in ('open', 'close'):
-                if next1.action_name == 'open':
-                    ok, err = self.handler.execute_open(next1)
-                    failure_id = "TAMP_OPEN_ERROR"
-                else:
-                    ok, err = self.handler.execute_close(next1)
-                    failure_id = "TAMP_CLOSE_ERROR"
-                failure = None
-                if not ok:
-                    failure = FailureEvent(
-                        failure_id=failure_id,
-                        stage=FailureStage.AFTER_EXECUTION,
-                        source=FailureSource.EXECUTOR,
-                        action=f"{next1.action_name}({next1.args[0]})",
-                        evidence={"error": err, "target": next1.args[0]},
-                        should_replan=True,
-                        message=err
-                    )
-                return 2, ok, err, failure
+                return self._execute_lid_bundle(
+                    [action, next1],
+                    start_index=index,
+                    total_action_count=len(actions),
+                    failure_checker=failure_checker,
+                    pre_action_checks_enabled=pre_action_checks_enabled,
+                    post_action_checks_enabled=post_action_checks_enabled,
+                )
 
-        return 0, False, "", None
+        return BundleExecutionOutcome(consumed=0, success=False)
+
+    def _execute_transfer_bundle(
+        self,
+        bundle_actions: List[DirectAction],
+        start_index: int = 0,
+        total_action_count: Optional[int] = None,
+        failure_checker=None,
+        pre_action_checks_enabled: bool = True,
+        post_action_checks_enabled: bool = True,
+    ) -> BundleExecutionOutcome:
+        move_to_pick, pick_action, move_to_place, place_action = bundle_actions
+        obj_name = pick_action.args[0]
+        target_region = normalize_region_name(place_action.args[1])
+        legacy_id = 'TAMP_EXECUTION_ERROR'
+        completed: List[str] = []
+        held_object = self.executor.held_object
+        last_action_name = self.executor._last_action_name
+        deferred_visibility_failure: Optional[FailureEvent] = None
+
+        self.executor._trace_bundle_state(
+            failure_checker,
+            event=f'before-bundle-transfer-{obj_name}',
+            label='before bundle',
+            desired=f'{obj_name} -> {target_region}',
+            current_action_index=start_index,
+            current_action_label=str(bundle_actions[0]),
+            completed_action_count=start_index,
+            total_action_count=total_action_count,
+        )
+
+        gt_executor, _, _, err = self.handler.create_transfer_executor(pick_action, place_action)
+        if gt_executor is None:
+            failure = self._runtime_failure(
+                pick_action,
+                err,
+                legacy_id=legacy_id,
+                evidence={'object': obj_name, 'target': target_region},
+                failure_checker=failure_checker,
+            )
+            self.executor._trace_bundle_state(
+                failure_checker,
+                event=f'failure-bundle-transfer-{obj_name}',
+                label='final failure event',
+                desired=f'{obj_name} -> {target_region}',
+                failure_event=failure,
+            )
+            return BundleExecutionOutcome(4, False, failure.message, failure, completed, held_object)
+
+        try:
+            for stage_index, stage_action in enumerate(bundle_actions):
+                action_label = f'{stage_action}'
+                if stage_action.action_name == 'move':
+                    action_label = 'move'
+                print(f'[BUNDLE] ({stage_index + 1}/4) {stage_action}')
+
+                if pre_action_checks_enabled and failure_checker is not None:
+                    pre_snapshot = self.executor._trace_bundle_state(
+                        failure_checker,
+                        event=f'before-bundle-{stage_index + 1}',
+                        label=f'before primitive {stage_index + 1}',
+                        action=stage_action,
+                        desired=f'{obj_name} -> {target_region}',
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + stage_index,
+                        total_action_count=total_action_count,
+                    )
+                    pre_failure = None
+                    if pre_snapshot is not None:
+                        pre_failure = failure_checker.precheck(
+                            stage_action,
+                            held_object,
+                            pre_snapshot,
+                            last_action_name=last_action_name,
+                        )
+                    if pre_failure is not None:
+                        pre_failure.evidence.setdefault('bundle', 'transfer')
+                        pre_failure.evidence.setdefault('legacy_failure_id', legacy_id)
+                        self.executor._trace_bundle_state(
+                            failure_checker,
+                            event=f'failure-bundle-{stage_index + 1}',
+                            label='final failure event',
+                        desired=f'{obj_name} -> {target_region}',
+                        failure_event=pre_failure,
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + len(completed),
+                        total_action_count=total_action_count,
+                    )
+                        return BundleExecutionOutcome(4, False, pre_failure.message, pre_failure, completed, held_object)
+
+                ok, msg = gt_executor.execute_next(requested_action=stage_action.action_name)
+                if not ok:
+                    failure = self._runtime_failure(
+                        stage_action,
+                        msg,
+                        legacy_id=legacy_id,
+                        evidence={'object': obj_name, 'target': target_region, 'stage_index': stage_index + 1},
+                        failure_checker=failure_checker,
+                    )
+                    self.executor._trace_bundle_state(
+                        failure_checker,
+                        event=f'failure-bundle-{stage_index + 1}',
+                        label='final failure event',
+                        desired=f'{obj_name} -> {target_region}',
+                        failure_event=failure,
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + len(completed),
+                        total_action_count=total_action_count,
+                    )
+                    return BundleExecutionOutcome(4, False, failure.message, failure, completed, held_object)
+
+                if stage_action.action_name == 'pick':
+                    held_object = obj_name
+                elif stage_action.action_name == 'place':
+                    held_object = None
+                self.executor.held_object = held_object
+                completed.append(str(stage_action))
+                last_action_name = stage_action.action_name
+
+                if post_action_checks_enabled and failure_checker is not None:
+                    post_snapshot = self.executor._trace_bundle_state(
+                        failure_checker,
+                        event=f'after-bundle-{stage_index + 1}',
+                        label=f'after primitive {stage_index + 1}',
+                        action=stage_action,
+                        desired=f'{obj_name} -> {target_region}',
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + stage_index + 1,
+                        total_action_count=total_action_count,
+                    )
+                    post_failure = None
+                    if post_snapshot is not None:
+                        post_failure = failure_checker.postcheck(stage_action, held_object, post_snapshot)
+                    if post_failure is not None:
+                        post_failure.evidence.setdefault('bundle', 'transfer')
+                        post_failure.evidence.setdefault('legacy_failure_id', legacy_id)
+                        if stage_action.action_name == 'place':
+                            self.executor._trace_bundle_state(
+                                failure_checker,
+                                event=f'failure-bundle-{stage_index + 1}',
+                                label='final failure event',
+                                desired=f'{obj_name} -> {target_region}',
+                                failure_event=post_failure,
+                                current_action_index=start_index + stage_index,
+                                current_action_label=str(stage_action),
+                                completed_action_count=start_index + stage_index + 1,
+                                total_action_count=total_action_count,
+                            )
+                            return BundleExecutionOutcome(4, False, post_failure.message, post_failure, completed, held_object)
+                        if post_failure.failure_id == 'new_object_discovered':
+                            deferred_visibility_failure = post_failure
+
+            print(f'[BUNDLE] Desired final state: {obj_name} -> {target_region}')
+            self.executor._trace_bundle_state(
+                failure_checker,
+                event=f'after-bundle-transfer-{obj_name}',
+                label='after bundle',
+                desired=f'{obj_name} -> {target_region}',
+                current_action_index=None,
+                current_action_label=None,
+                completed_action_count=start_index + len(bundle_actions),
+                total_action_count=total_action_count,
+            )
+        finally:
+            try:
+                self.executor.go_home()
+            except Exception:
+                pass
+
+        if deferred_visibility_failure is not None:
+            self.executor._trace_bundle_state(
+                failure_checker,
+                event=f'failure-bundle-transfer-{obj_name}',
+                label='final failure event',
+                desired=f'{obj_name} -> {target_region}',
+                failure_event=deferred_visibility_failure,
+                current_action_index=None,
+                current_action_label=None,
+                completed_action_count=start_index + len(completed),
+                total_action_count=total_action_count,
+            )
+            return BundleExecutionOutcome(
+                4,
+                False,
+                deferred_visibility_failure.message,
+                deferred_visibility_failure,
+                completed,
+                held_object,
+            )
+
+        print(f"[BUNDLE] ✓ Transfer bundle complete: {obj_name} -> {target_region}")
+        return BundleExecutionOutcome(4, True, "", None, completed, held_object)
+
+    def _execute_lid_bundle(
+        self,
+        bundle_actions: List[DirectAction],
+        start_index: int = 0,
+        total_action_count: Optional[int] = None,
+        failure_checker=None,
+        pre_action_checks_enabled: bool = True,
+        post_action_checks_enabled: bool = True,
+    ) -> BundleExecutionOutcome:
+        move_action, lid_action = bundle_actions
+        legacy_id = 'TAMP_OPEN_ERROR' if lid_action.action_name == 'open' else 'TAMP_CLOSE_ERROR'
+        completed: List[str] = []
+        held_object = self.executor.held_object
+        desired = f'{lid_action.args[0]} {lid_action.action_name}'
+        deferred_visibility_failure: Optional[FailureEvent] = None
+
+        self.executor._trace_bundle_state(
+            failure_checker,
+            event=f'before-bundle-{lid_action.action_name}',
+            label='before bundle',
+            desired=desired,
+            current_action_index=start_index,
+            current_action_label=str(bundle_actions[0]),
+            completed_action_count=start_index,
+            total_action_count=total_action_count,
+        )
+
+        for stage_index, stage_action in enumerate(bundle_actions):
+            if pre_action_checks_enabled and failure_checker is not None:
+                pre_snapshot = self.executor._trace_bundle_state(
+                    failure_checker,
+                    event=f'before-lid-bundle-{stage_index + 1}',
+                    label=f'before primitive {stage_index + 1}',
+                    action=stage_action,
+                    desired=desired,
+                    current_action_index=start_index + stage_index,
+                    current_action_label=str(stage_action),
+                    completed_action_count=start_index + stage_index,
+                    total_action_count=total_action_count,
+                )
+                last_action_name = self.executor._last_action_name if stage_index == 0 else bundle_actions[stage_index - 1].action_name
+                pre_failure = None
+                if pre_snapshot is not None:
+                    pre_failure = failure_checker.precheck(
+                        stage_action,
+                        held_object,
+                        pre_snapshot,
+                        last_action_name=last_action_name,
+                    )
+                if pre_failure is not None:
+                    pre_failure.evidence.setdefault('bundle', 'lid')
+                    pre_failure.evidence.setdefault('legacy_failure_id', legacy_id)
+                    self.executor._trace_bundle_state(
+                        failure_checker,
+                        event=f'failure-lid-bundle-{stage_index + 1}',
+                        label='final failure event',
+                        desired=desired,
+                        failure_event=pre_failure,
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + len(completed),
+                        total_action_count=total_action_count,
+                    )
+                    return BundleExecutionOutcome(2, False, pre_failure.message, pre_failure, completed, held_object)
+
+            if stage_action.action_name == 'move':
+                try:
+                    self.executor.go_home()
+                except Exception:
+                    pass
+                completed.append(str(stage_action))
+                post_snapshot = self.executor._trace_bundle_state(
+                    failure_checker,
+                    event=f'after-lid-bundle-{stage_index + 1}',
+                    label=f'after primitive {stage_index + 1}',
+                    action=stage_action,
+                    desired=desired,
+                    current_action_index=start_index + stage_index,
+                    current_action_label=str(stage_action),
+                    completed_action_count=start_index + stage_index + 1,
+                    total_action_count=total_action_count,
+                )
+                if post_action_checks_enabled and failure_checker is not None and post_snapshot is not None:
+                    post_failure = failure_checker.postcheck(stage_action, held_object, post_snapshot)
+                    if post_failure is not None and post_failure.failure_id == 'new_object_discovered':
+                        post_failure.evidence.setdefault('bundle', 'lid')
+                        post_failure.evidence.setdefault('legacy_failure_id', legacy_id)
+                        deferred_visibility_failure = post_failure
+                continue
+
+            if lid_action.action_name == 'open':
+                ok, err = self.handler.execute_open(lid_action)
+            else:
+                ok, err = self.handler.execute_close(lid_action)
+
+            if not ok:
+                failure = self._runtime_failure(
+                    lid_action,
+                    err,
+                    legacy_id=legacy_id,
+                    evidence={'target': lid_action.args[0], 'bundle': 'lid'},
+                    failure_checker=failure_checker,
+                )
+                self.executor._trace_bundle_state(
+                    failure_checker,
+                    event=f'failure-lid-bundle-{lid_action.action_name}',
+                    label='final failure event',
+                        desired=desired,
+                        failure_event=failure,
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + len(completed),
+                        total_action_count=total_action_count,
+                    )
+                return BundleExecutionOutcome(2, False, failure.message, failure, completed, held_object)
+
+            completed.append(str(stage_action))
+            if post_action_checks_enabled and failure_checker is not None:
+                post_snapshot = self.executor._trace_bundle_state(
+                    failure_checker,
+                    event=f'after-lid-bundle-{stage_index + 1}',
+                    label=f'after primitive {stage_index + 1}',
+                    action=stage_action,
+                    desired=desired,
+                    current_action_index=start_index + stage_index,
+                    current_action_label=str(stage_action),
+                    completed_action_count=start_index + stage_index + 1,
+                    total_action_count=total_action_count,
+                )
+                post_failure = None
+                if post_snapshot is not None:
+                    post_failure = failure_checker.postcheck(stage_action, held_object, post_snapshot)
+                if post_failure is not None:
+                    post_failure.evidence.setdefault('bundle', 'lid')
+                    post_failure.evidence.setdefault('legacy_failure_id', legacy_id)
+                    self.executor._trace_bundle_state(
+                        failure_checker,
+                        event=f'failure-lid-bundle-{lid_action.action_name}',
+                        label='final failure event',
+                        desired=desired,
+                        failure_event=post_failure,
+                        current_action_index=start_index + stage_index,
+                        current_action_label=str(stage_action),
+                        completed_action_count=start_index + stage_index + 1,
+                        total_action_count=total_action_count,
+                    )
+                    return BundleExecutionOutcome(2, False, post_failure.message, post_failure, completed, held_object)
+
+        self.executor._trace_bundle_state(
+            failure_checker,
+            event=f'after-bundle-{lid_action.action_name}',
+            label='after bundle',
+            desired=desired,
+            current_action_index=None,
+            current_action_label=None,
+            completed_action_count=start_index + len(bundle_actions),
+            total_action_count=total_action_count,
+        )
+        if deferred_visibility_failure is not None:
+            self.executor._trace_bundle_state(
+                failure_checker,
+                event=f'failure-lid-bundle-{lid_action.action_name}',
+                label='final failure event',
+                desired=desired,
+                failure_event=deferred_visibility_failure,
+                current_action_index=None,
+                current_action_label=None,
+                completed_action_count=start_index + len(completed),
+                total_action_count=total_action_count,
+            )
+            return BundleExecutionOutcome(
+                2,
+                False,
+                deferred_visibility_failure.message,
+                deferred_visibility_failure,
+                completed,
+                held_object,
+            )
+        print(f"[BUNDLE] ✓ Lid bundle complete: {desired}")
+        return BundleExecutionOutcome(2, True, "", None, completed, held_object)
+
+    def _runtime_failure(
+        self,
+        action: DirectAction,
+        message: str,
+        legacy_id: str,
+        evidence: dict,
+        failure_checker=None,
+    ) -> FailureEvent:
+        if failure_checker is not None:
+            failure = failure_checker.classify_runtime_error(action, message or 'Execution failed')
+        else:
+            failure = FailureEvent(
+                failure_id='executor_failure',
+                stage=FailureStage.BEFORE_EXECUTION,
+                source=FailureSource.EXECUTOR,
+                action=str(action),
+                evidence={'runtime_message': message},
+                failure_layer=FailureLayer.LAYER_1,
+                message=message or 'Execution failed',
+            )
+        failure.evidence.update(dict(evidence))
+        failure.evidence.setdefault('legacy_failure_id', legacy_id)
+        return failure
 
 
 class DirectPrimitiveExecutor(VLMExecutorV2):
@@ -339,6 +775,7 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
         self._pending_pddl_segments: Optional[dict] = None
         self.action_start_callback: Optional[Callable[[List[DirectAction], int], None]] = None
         self.bundler: Optional[UnifiedActionBundler] = None
+        self.scene_state_trace_enabled = False
         if env is not None:
             self.set_env(env)
 
@@ -350,6 +787,18 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
     def set_action_start_callback(self, callback: Optional[Callable[[List[DirectAction], int], None]]) -> None:
         self.action_start_callback = callback
 
+    def set_scene_state_trace_enabled(self, enabled: bool) -> None:
+        self.scene_state_trace_enabled = bool(enabled)
+
+    def _run_external_step_callback(self) -> None:
+        callback = getattr(self, 'step_callback', None)
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception:
+            pass
+
     def reset_episode(self) -> None:
         super().reset()
         self.held_object = None
@@ -359,6 +808,186 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
         self._manual_hold_context = None
         self._last_action_name = None
         self._pending_pddl_segments = None
+
+    def _trace_bundle_state(
+        self,
+        failure_checker,
+        event: str,
+        label: str,
+        action: Optional[DirectAction] = None,
+        desired: Optional[str] = None,
+        failure_event: Optional[FailureEvent] = None,
+        current_action_index: Optional[int] = None,
+        current_action_label: Optional[str] = None,
+        completed_action_count: Optional[int] = None,
+        total_action_count: Optional[int] = None,
+    ):
+        if failure_checker is None:
+            return None
+        try:
+            snapshot = failure_checker.capture_snapshot(event=event)
+        except Exception as exc:
+            if self.scene_state_trace_enabled:
+                print(f'[SCENE-STATE] {label}: capture failed: {exc}')
+            return None
+        adapter = getattr(failure_checker, 'adapter', None)
+        scene_state_info = self._build_live_scene_state_info(failure_checker, snapshot)
+        if adapter is not None:
+            if hasattr(adapter, 'set_live_action_progress'):
+                adapter.set_live_action_progress(
+                    current_action_index=current_action_index,
+                    current_action_label=current_action_label,
+                    completed_action_count=completed_action_count,
+                    total_action_count=total_action_count,
+                )
+            if hasattr(adapter, 'set_live_scene_state'):
+                adapter.set_live_scene_state(
+                    snapshot,
+                    label=label,
+                    desired=desired or '',
+                    held_object=self.held_object,
+                    failure_event=failure_event,
+                    scene_state_info=scene_state_info,
+                    completed_action_count=completed_action_count,
+                    total_action_count=total_action_count,
+                )
+        if not self.scene_state_trace_enabled:
+            return snapshot
+
+        action_text = f' | action={action}' if action is not None else ''
+        desired_text = f' | desired={desired}' if desired else ''
+        print(f'[SCENE-STATE] {label}{action_text}{desired_text}')
+        visible = ', '.join(list(getattr(snapshot, 'visible_objects', []) or [])[:12]) or '(none)'
+        print(f'  visible: {visible}')
+
+        object_region_map = dict(getattr(snapshot, 'object_region_map', {}) or {})
+        if object_region_map:
+            region_items = [
+                f'{name}={region}'
+                for name, region in sorted(object_region_map.items())
+            ]
+            print(f'  object_region_map: {", ".join(region_items)}')
+        else:
+            print('  object_region_map: (unresolved)')
+
+        gripper_evidence = dict(getattr(snapshot, 'gripper_evidence', {}) or {})
+        if gripper_evidence:
+            holding = self.held_object or '(none)'
+            print(f'  gripper: holding={holding}, evidence_visible={bool(gripper_evidence.get("visible", False))}')
+        if failure_event is not None:
+            layer_value = (
+                failure_event.failure_layer.value
+                if isinstance(failure_event.failure_layer, FailureLayer)
+                else str(failure_event.failure_layer)
+            )
+            print(
+                f'  failure: {layer_value} '
+                f'{failure_event.failure_id} | {failure_event.message}'
+            )
+        return snapshot
+
+    def _build_live_scene_state_info(self, failure_checker, snapshot) -> dict:
+        adapter = getattr(failure_checker, 'adapter', None)
+        detector = getattr(adapter, 'detector', None)
+        visible_objects = list(getattr(snapshot, 'visible_objects', []) or [])
+        pose_map_keys = []
+        if detector is not None:
+            for name in visible_objects:
+                try:
+                    pose = detector.get_object_pose(name)
+                except Exception:
+                    pose = None
+                if pose:
+                    pose_map_keys.append(name)
+
+        object_region_map = dict(getattr(snapshot, 'object_region_map', {}) or {})
+        lid_info = self._live_lid_info(failure_checker, snapshot)
+        pddl_state = []
+        if 'grill_lid' in visible_objects or any(region == 'inside_grill' for region in object_region_map.values()):
+            pddl_state = derive_grill_semantic_facts(
+                object_region_map,
+                lid_open=lid_info.get('open') if lid_info.get('name') == 'grill_lid' else None,
+            )
+
+        return {
+            'visible_objects': visible_objects,
+            'newly_visible_objects': list(getattr(snapshot, 'newly_visible_objects', []) or []),
+            'visible_regions': list(getattr(snapshot, 'visible_regions', []) or []),
+            'supported_regions': list(getattr(snapshot, 'supported_regions', []) or []),
+            'pose_map_keys': pose_map_keys,
+            'object_region_map': object_region_map,
+            'object_region_descriptions': dict(getattr(snapshot, 'object_region_descriptions', {}) or {}),
+            'gripper': self._live_gripper_info(),
+            'lid': lid_info,
+            'pddl_state': pddl_state,
+        }
+
+    def _live_gripper_info(self) -> dict:
+        info = {
+            'status': 'holding' if self.held_object else 'empty',
+            'holding': self.held_object,
+            'open_amount': None,
+            'open_closed': 'unknown',
+        }
+        gripper = getattr(self.env, 'gripper', None)
+        if gripper is None:
+            return info
+        try:
+            open_values = list(gripper.get_open_amount())
+            if open_values:
+                avg_open = float(sum(float(v) for v in open_values) / len(open_values))
+                info['open_amount'] = round(avg_open, 3)
+                info['open_closed'] = 'open' if avg_open > 0.65 else 'closed'
+        except Exception:
+            pass
+        try:
+            grasped = gripper.get_grasped_objects()
+            if grasped:
+                info['status'] = 'holding'
+        except Exception:
+            pass
+        return info
+
+    def _live_lid_info(self, failure_checker, snapshot) -> dict:
+        visible = set(getattr(snapshot, 'visible_objects', []) or [])
+        if 'grill_lid' in visible or getattr(self.env, 'lid_joint', None) is not None:
+            lid_open = infer_grill_lid_open(self.env)
+            joint = getattr(self.env, 'lid_joint', None)
+            angle = None
+            if joint is not None:
+                try:
+                    angle = float(joint.get_joint_position())
+                except Exception:
+                    angle = None
+            return {
+                'name': 'grill_lid',
+                'open': lid_open,
+                'state': 'open' if lid_open is True else 'closed' if lid_open is False else 'unknown',
+                'current_angle': None if angle is None or math.isnan(angle) else round(angle, 3),
+                'closed_reference_angle': getattr(self.env, '_closed_lid_angle', None),
+            }
+
+        if 'box_lid' in visible:
+            lid_open = None
+            try:
+                lid_open = bool(failure_checker._is_lid_open(snapshot, 'box_lid'))
+            except Exception:
+                pass
+            return {
+                'name': 'box_lid',
+                'open': lid_open,
+                'state': 'open' if lid_open is True else 'closed' if lid_open is False else 'unknown',
+                'current_angle': None,
+                'closed_reference_angle': None,
+            }
+
+        return {
+            'name': None,
+            'open': None,
+            'state': 'unknown',
+            'current_angle': None,
+            'closed_reference_angle': None,
+        }
 
     def execute_actions(
         self,
@@ -381,25 +1010,35 @@ class DirectPrimitiveExecutor(VLMExecutorV2):
             
             # --- Try Bundling ---
             if self.bundler:
-                consumed, success, err, fail_event = self.bundler.try_execute_bundle(actions, index)
-                if consumed > 0:
-                    if not success:
+                bundle = self.bundler.try_execute_bundle(
+                    actions,
+                    index,
+                    failure_checker=failure_checker,
+                    pre_action_checks_enabled=pre_action_checks_enabled,
+                    post_action_checks_enabled=post_action_checks_enabled,
+                )
+                if bundle.consumed > 0:
+                    if bundle.completed_actions:
+                        self.completed_primitive_actions.extend(bundle.completed_actions)
+                    self.held_object = bundle.held_object
+                    if bundle.completed_actions:
+                        last_completed_name = actions[index + len(bundle.completed_actions) - 1].action_name
+                        self._last_action_name = last_completed_name
+
+                    if not bundle.success:
+                        remaining_start = index + len(bundle.completed_actions)
+                        self.remaining_actions = [str(item) for item in actions[remaining_start:]]
+                        self.last_failure_event = bundle.failure_event
                         return PrimitiveExecutionOutcome(
                             success=False, 
-                            error_message=err,
-                            last_failure_event=fail_event
+                            completed_actions=list(self.completed_primitive_actions),
+                            remaining_actions=list(self.remaining_actions),
+                            held_object=self.held_object,
+                            error_message=bundle.error_message,
+                            last_failure_event=bundle.failure_event
                         )
-                    
-                    # Log bundled actions and update held_object state
-                    for i in range(consumed):
-                        action_item = actions[index + i]
-                        self.completed_primitive_actions.append(str(action_item))
-                        if action_item.action_name == 'pick':
-                            self.held_object = action_item.args[0]
-                        elif action_item.action_name == 'place':
-                            self.held_object = None
-                    
-                    skip_counter = consumed - 1
+
+                    skip_counter = bundle.consumed - 1
                     continue
             # --- End Bundling ---
 

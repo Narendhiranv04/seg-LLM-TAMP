@@ -128,6 +128,7 @@ HANDLE_ANCHOR_REL_MATRIX = None
 CLOSE_WP_NAME = "waypoint23"
 OPEN_WP_NAME = "waypoint29"
 ACTION_PROGRESS_CALLBACK = None
+STEP_CALLBACK = None
 SCENE_VARIANT_ID_MAP = {
     "grill.variation1.ttt": "G1",
     "grill.variation2.ttt": "G2",
@@ -149,6 +150,16 @@ def _emit_action_progress(action_name, action_label=None):
         pass
 
 
+def _run_step_callback():
+    cb = STEP_CALLBACK
+    if cb is None:
+        return
+    try:
+        cb()
+    except Exception:
+        pass
+
+
 def _enforce_min_open_travel():
     global LID_OPEN_ANGLE, LID_CLOSED_ANGLE
     if not FORCE_MIN_OPEN_TRAVEL:
@@ -164,6 +175,7 @@ def _enforce_min_open_travel():
 def step(pr, n=1):
     for _ in range(max(1, int(n))):
         pr.step()
+        _run_step_callback()
 
 
 def _interp_traj(traj, steps_per_segment=12):
@@ -186,6 +198,7 @@ def execute_trajectory(env, pr, traj, steps_per_segment=12):
     for q in dense:
         env.set_robot_conf(q)
         pr.step()
+        _run_step_callback()
 
 
 def _move_to_conf(env, pr, q_target, label="move"):

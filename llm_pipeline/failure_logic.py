@@ -5,8 +5,57 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from llm_pipeline.segmentation_adapter import SegmentationEvidenceAdapter
-from llm_pipeline.pipeline_types import DirectAction, FailureEvent, FailureSource, FailureStage, SegmentationSnapshot
-from llm_pipeline.region_aliases import normalize_region_name
+from llm_pipeline.pipeline_types import (
+    DirectAction,
+    FailureEvent,
+    FailureLayer,
+    FailureSource,
+    FailureStage,
+    SegmentationSnapshot,
+)
+from llm_pipeline.region_aliases import normalize_region_name, regions_match_for_target
+
+
+LAYER_1_FAILURE_IDS = frozenset({
+    'missing_preceding_move',
+    'invalid_executor_state',
+    'pick_object_missing',
+    'lid_missing',
+    'geometric_discovery_fail',
+    'empty_pick_trajectory',
+    'empty_place_trajectory',
+    'lid_hover_planning_fail',
+    'lid_slide_planning_fail',
+    'pddl_no_plan',
+    'no_ik_solution',
+    'no_motion_plan',
+    'no_grasp_found',
+    'executor_failure',
+    'unsupported_action',
+    'unknown_action_token',
+    'pick_place_mismatch',
+    'orphan_place',
+    'missing_post_pick_place',
+})
+
+LAYER_2_FAILURE_IDS = frozenset({
+    'grasp_failed',
+    'object_dropped',
+    'object_did_not_move',
+    'object_missing_after_place',
+    'placement_failed',
+    'geometric_placement_failed',
+    'lid_not_open_enough',
+    'lid_not_closed_enough',
+    'new_object_discovered',
+})
+
+
+def failure_layer_for_id(failure_id: str) -> FailureLayer:
+    """Return the single logical layer for a known failure id."""
+    if failure_id in LAYER_2_FAILURE_IDS:
+        return FailureLayer.LAYER_2
+    return FailureLayer.LAYER_1
 
 
 class SegmentationFirstFailureChecker:
@@ -45,6 +94,7 @@ class SegmentationFirstFailureChecker:
                 source=FailureSource.EXECUTOR,
                 action=str(action),
                 evidence={'last_action': last_action_name or '(none)', 'expected': 'move'},
+                failure_layer=FailureLayer.LAYER_1,
                 should_replan=True,
                 message=f'Action {action} requires a preceding move to position the arm, but last action was {last_action_name or "(none)"}',
             )
@@ -58,6 +108,7 @@ class SegmentationFirstFailureChecker:
                     source=FailureSource.EXECUTOR,
                     action=str(action),
                     evidence={'held_object': held_object, 'expected_empty_gripper': True},
+                    failure_layer=FailureLayer.LAYER_1,
                     should_replan=False,
                     message=f'Cannot pick {object_name} while already holding {held_object}',
                 )
@@ -70,6 +121,7 @@ class SegmentationFirstFailureChecker:
                     source=FailureSource.SEGMENTATION,
                     action=str(action),
                     evidence={'object_name': object_name, 'visible_objects': snapshot.visible_objects},
+                    failure_layer=FailureLayer.LAYER_1,
                     message=f'Cannot pick {object_name} because it is not visible in the segmentation snapshot',
                 )
             return None
@@ -84,6 +136,7 @@ class SegmentationFirstFailureChecker:
                     source=FailureSource.EXECUTOR,
                     action=str(action),
                     evidence={'held_object': held_object, 'place_object': object_name, 'target_region': target_region},
+                    failure_layer=FailureLayer.LAYER_1,
                     should_replan=False,
                     message=f'Cannot place {object_name} while holding {held_object}',
                 )
@@ -96,19 +149,22 @@ class SegmentationFirstFailureChecker:
                 source=FailureSource.EXECUTOR,
                 action=str(action),
                 evidence={'held_object': held_object, 'expected_empty_gripper': True},
+                failure_layer=FailureLayer.LAYER_1,
                 should_replan=False,
-                message=f'Cannot open the lid while holding {held_object}',
+                message=f'Cannot {action.action_name} the lid while holding {held_object}',
             )
 
-        lid_evidence = snapshot.object_evidence.get('box_lid')
+        lid_name = action.args[0] if action.args else 'box_lid'
+        lid_evidence = snapshot.object_evidence.get(lid_name)
         if lid_evidence is None or not lid_evidence.visible:
             return FailureEvent(
                 failure_id='lid_missing',
                 stage=FailureStage.BEFORE_EXECUTION,
                 source=FailureSource.SEGMENTATION,
                 action=str(action),
-                evidence={'object_name': 'box_lid', 'visible_objects': snapshot.visible_objects},
-                message='Cannot open the lid because box_lid is not visible in the segmentation snapshot',
+                evidence={'object_name': lid_name, 'visible_objects': snapshot.visible_objects},
+                failure_layer=FailureLayer.LAYER_1,
+                message=f'Cannot {action.action_name} the lid because {lid_name} is not visible in the segmentation snapshot',
             )
         return None
 
@@ -134,6 +190,7 @@ class SegmentationFirstFailureChecker:
                 source=FailureSource.SEGMENTATION,
                 action=str(action),
                 evidence=evidence.to_dict(),
+                failure_layer=FailureLayer.LAYER_2,
                 message=f'{object_name} is not confirmed near the gripper after pick execution',
             )
 
@@ -148,12 +205,13 @@ class SegmentationFirstFailureChecker:
                     source=FailureSource.SEGMENTATION,
                     action=str(action),
                     evidence={'object_name': object_name, 'target_region': target_region},
+                    failure_layer=FailureLayer.LAYER_2,
                     message=f'{object_name} is no longer visible after place execution',
                 )
 
             object_region_map = getattr(snapshot, 'object_region_map', {}) or {}
             observed_region = normalize_region_name(object_region_map.get(object_name))
-            if observed_region and observed_region == target_region:
+            if observed_region and regions_match_for_target(observed_region, target_region):
                 return self._maybe_new_visibility_failure(action, snapshot)
             return FailureEvent(
                 failure_id='placement_failed',
@@ -166,24 +224,66 @@ class SegmentationFirstFailureChecker:
                     'geometric_region': observed_region or None,
                     'object_region_map': dict(object_region_map),
                 },
+                failure_layer=FailureLayer.LAYER_2,
                 message=f'{object_name} is geometrically resolved in {observed_region or "(unresolved)"}, not target region {target_region}',
             )
 
-        if not self.adapter.is_lid_open(snapshot):
-            lid_evidence = snapshot.object_evidence.get('box_lid')
+        lid_name = action.args[0] if action.args else 'box_lid'
+        lid_open = self._is_lid_open(snapshot, lid_name)
+        if action.action_name == 'open' and not lid_open:
+            lid_evidence = snapshot.object_evidence.get(lid_name)
             return FailureEvent(
                 failure_id='lid_not_open_enough',
                 stage=FailureStage.AFTER_EXECUTION,
                 source=FailureSource.SEGMENTATION,
                 action=str(action),
                 evidence=lid_evidence.to_dict() if lid_evidence is not None else {},
-                message='The lid is still observed over the box boundary after the open action completed',
+                failure_layer=FailureLayer.LAYER_2,
+                message=f'{lid_name} is still observed closed after the open action completed',
+            )
+        if action.action_name == 'close' and lid_open:
+            lid_evidence = snapshot.object_evidence.get(lid_name)
+            return FailureEvent(
+                failure_id='lid_not_closed_enough',
+                stage=FailureStage.AFTER_EXECUTION,
+                source=FailureSource.SEGMENTATION,
+                action=str(action),
+                evidence=lid_evidence.to_dict() if lid_evidence is not None else {},
+                failure_layer=FailureLayer.LAYER_2,
+                message='The lid is still observed open after the close action completed',
             )
         return self._maybe_new_visibility_failure(action, snapshot)
 
     def classify_runtime_error(self, action: DirectAction, message: str) -> FailureEvent:
         lowered = (message or '').lower()
-        if 'empty trajectory' in lowered and action.action_name == 'pick':
+        stage = FailureStage.BEFORE_EXECUTION
+        layer = FailureLayer.LAYER_1
+        if 'not found after placement' in lowered:
+            failure_id = 'object_missing_after_place'
+            source = FailureSource.VALIDATION
+            stage = FailureStage.AFTER_EXECUTION
+            layer = FailureLayer.LAYER_2
+        elif "didn't move" in lowered or 'did not move' in lowered:
+            failure_id = 'object_did_not_move'
+            source = FailureSource.VALIDATION
+            stage = FailureStage.AFTER_EXECUTION
+            layer = FailureLayer.LAYER_2
+        elif 'fell' in lowered:
+            failure_id = 'object_dropped'
+            source = FailureSource.VALIDATION
+            stage = FailureStage.AFTER_EXECUTION
+            layer = FailureLayer.LAYER_2
+        elif 'not in target region' in lowered or 'validation failed' in lowered:
+            failure_id = 'placement_failed'
+            source = FailureSource.VALIDATION
+            stage = FailureStage.AFTER_EXECUTION
+            layer = FailureLayer.LAYER_2
+        elif "lid didn't slide open enough" in lowered or 'not open enough' in lowered:
+            failure_id = 'lid_not_open_enough'
+            source = FailureSource.VALIDATION
+            stage = FailureStage.AFTER_EXECUTION
+            layer = FailureLayer.LAYER_2
+        elif 'empty trajectory' in lowered and action.action_name == 'pick':
             failure_id = 'empty_pick_trajectory'
             source = FailureSource.GEOMETRY
         elif 'empty trajectory' in lowered and action.action_name == 'place':
@@ -212,10 +312,11 @@ class SegmentationFirstFailureChecker:
             source = FailureSource.EXECUTOR
         return FailureEvent(
             failure_id=failure_id,
-            stage=FailureStage.BEFORE_EXECUTION,
+            stage=stage,
             source=source,
             action=str(action),
             evidence={'runtime_message': message},
+            failure_layer=layer,
             message=message,
         )
 
@@ -231,8 +332,14 @@ class SegmentationFirstFailureChecker:
                 return 'move'
             return a
 
+        layer_value = (
+            failure_event.failure_layer.value
+            if isinstance(failure_event.failure_layer, FailureLayer)
+            else str(failure_event.failure_layer)
+        )
         lines = [
             f'failure_id={failure_event.failure_id}',
+            f'failure_layer={layer_value}',
             f'stage={failure_event.stage.value}',
             f'action={failure_event.action or "(none)"}',
             f'message={failure_event.message}',
@@ -280,6 +387,7 @@ class SegmentationFirstFailureChecker:
                 'newly_visible_objects': discovered,
                 'all_newly_visible_objects': list(snapshot.newly_visible_objects),
             },
+            failure_layer=FailureLayer.LAYER_2,
             message=f'Newly visible objects require replanning: {", ".join(discovered)}',
         )
 
@@ -288,6 +396,12 @@ class SegmentationFirstFailureChecker:
         if evidence is None or evidence.gripper_proximity is None:
             return False
         return evidence.gripper_proximity <= self.gripper_threshold
+
+    def _is_lid_open(self, snapshot: SegmentationSnapshot, lid_name: str) -> bool:
+        try:
+            return bool(self.adapter.is_lid_open(snapshot, lid_name=lid_name))
+        except TypeError:
+            return bool(self.adapter.is_lid_open(snapshot))
 
 from llm_pipeline.geometric_utils import GeometricReasoner
 
@@ -324,6 +438,7 @@ class GeometricFailureChecker(SegmentationFirstFailureChecker):
                     source=FailureSource.GEOMETRY,
                     action=str(action),
                     evidence={'object_name': obj_name},
+                    failure_layer=FailureLayer.LAYER_1,
                     message=f'Cannot pick {obj_name}: 3D pose could not be resolved from current view.'
                 )
 
@@ -338,6 +453,7 @@ class GeometricFailureChecker(SegmentationFirstFailureChecker):
                     source=FailureSource.GEOMETRY,
                     action=str(action),
                     evidence={'region_name': region_name},
+                    failure_layer=FailureLayer.LAYER_1,
                     message=f'Cannot place in {region_name}: Target region pose could not be resolved.'
                 )
 
@@ -364,6 +480,11 @@ class GeometricFailureChecker(SegmentationFirstFailureChecker):
         if action.action_name == 'place':
             obj_name, region_name = action.args
             region_name = normalize_region_name(region_name)
+            object_region_map = getattr(snapshot, 'object_region_map', {}) or {}
+            observed_region = normalize_region_name(object_region_map.get(obj_name))
+            if observed_region and regions_match_for_target(observed_region, region_name):
+                return super().postcheck(action, held_object, snapshot)
+
             detector = getattr(self.adapter, 'detector', None)
             if detector:
                 obj_pose = detector.get_object_pose(obj_name)
@@ -378,6 +499,7 @@ class GeometricFailureChecker(SegmentationFirstFailureChecker):
                             source=FailureSource.GEOMETRY,
                             action=str(action),
                             evidence={'is_contained': False, 'obj_pose': obj_pose, 'region': region_name},
+                            failure_layer=FailureLayer.LAYER_2,
                             message=f'Geometric Verification: {obj_name} is NOT contained within {region_name} after placement.'
                         )
 

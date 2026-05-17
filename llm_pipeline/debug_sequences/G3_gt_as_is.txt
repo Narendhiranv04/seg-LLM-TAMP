@@ -4,15 +4,6 @@
 name: G3_gt_as_is
 variant: G3
 goal: Replay G3 ground-truth concrete sequence through llm_pipeline executor.
-status: pending
-last_run: 
-last_exit_code: 
-last_success: 
-completed_actions: 0/34
-last_completed_action: 
-failure_id: 
-failure_source: 
-failure_message: 
 move(grill_lid)
 open(grill_lid)
 move(spam)
@@ -47,3 +38,21 @@ move(steak1)
 pick(steak1)
 move(plate-top)
 place(steak1, plate-top)
+status: failed
+last_run: 2026-05-17T07:08:24Z
+last_exit_code: 1
+last_success: False
+completed_actions: 2/34
+completed_action_trace: move(->open) | open(grill_lid)
+last_completed_action: open(grill_lid)
+remaining_actions: 32
+remaining_action_trace: move(->pick) | pick(spam) | move(->place) | place(spam, table) | move(->pick) | pick(plate) | move(->place) | place(plate, plate_boundary) | move(->pick) | pick(steak) | move(->place) | place(steak, plate-top) | move(->pick) | pick(chicken) | move(->place) | place(chicken, inside_grill) | move(->pick) | pick(steak1) | move(->place) | place(steak1, inside_grill) | move(->close) | close(grill_lid) | move(->open) | open(grill_lid) | move(->pick) | pick(chicken) | move(->place) | place(chicken, plate-top) | move(->pick) | pick(steak1) | move(->place) | place(steak1, plate-top)
+failure_id: new_object_discovered
+failure_layer: layer_2
+failure_stage: after_execution
+failure_source: segmentation
+failure_action: open(grill_lid)
+failure_should_replan: True
+failure_message: Newly visible objects require replanning: spam, steak
+failure_reason: Newly visible objects require replanning: spam, steak
+failure_evidence: {"all_newly_visible_objects": ["spam", "steak"], "bundle": "lid", "legacy_failure_id": "TAMP_OPEN_ERROR", "newly_visible_objects": ["spam", "steak"]}

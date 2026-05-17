@@ -27,6 +27,11 @@ class FailureSource(str, Enum):
     PARSER = "parser"
 
 
+class FailureLayer(str, Enum):
+    LAYER_1 = "layer_1"
+    LAYER_2 = "layer_2"
+
+
 @dataclass(frozen=True)
 class DirectAction:
     """A directly executable action line from the LLM."""
@@ -153,10 +158,13 @@ class FailureEvent:
     evidence: Dict[str, Any]
     should_replan: bool = True
     message: str = ""
+    failure_layer: FailureLayer = FailureLayer.LAYER_1
 
     def to_dict(self) -> Dict[str, Any]:
+        layer = self.failure_layer.value if isinstance(self.failure_layer, FailureLayer) else str(self.failure_layer)
         return {
             "failure_id": self.failure_id,
+            "failure_layer": layer,
             "stage": self.stage.value,
             "source": self.source.value,
             "action": self.action,

@@ -4,15 +4,6 @@
 name: K1_gt_as_is
 variant: K1
 goal: Replay K1 ground-truth concrete sequence through llm_pipeline executor.
-status: pending
-last_run: 
-last_exit_code: 
-last_success: 
-completed_actions: 0/26
-last_completed_action: 
-failure_id: 
-failure_source: 
-failure_message: 
 move(mug2)
 pick(mug2)
 move(placement_boundary)
@@ -39,3 +30,21 @@ move(mug3)
 pick(mug3)
 move(box_storage)
 place(mug3, box_storage)
+status: failed
+last_run: 2026-05-17T07:14:22Z
+last_exit_code: 1
+last_success: False
+completed_actions: 10/26
+completed_action_trace: move(->pick) | pick(mug2) | move(->place) | place(mug2, placement_boundary) | move(->pick) | pick(mug3) | move(->place) | place(mug3, placement_boundary) | move(->open) | open(box_lid)
+last_completed_action: open(box_lid)
+remaining_actions: 16
+remaining_action_trace: move(->pick) | pick(soup) | move(->place) | place(soup, cupboard_lower) | move(->pick) | pick(spam) | move(->place) | place(spam, cupboard_lower) | move(->pick) | pick(mug2) | move(->place) | place(mug2, box_storage) | move(->pick) | pick(mug3) | move(->place) | place(mug3, box_storage)
+failure_id: new_object_discovered
+failure_layer: layer_2
+failure_stage: after_execution
+failure_source: segmentation
+failure_action: open(box_lid)
+failure_should_replan: True
+failure_message: Newly visible objects require replanning: soup
+failure_reason: Newly visible objects require replanning: soup
+failure_evidence: {"all_newly_visible_objects": ["soup"], "bundle": "lid", "legacy_failure_id": "TAMP_OPEN_ERROR", "newly_visible_objects": ["soup"]}

@@ -148,6 +148,57 @@ class SegmentationEvidenceAdapter:
         except Exception:
             pass
 
+    def set_live_action_progress(
+        self,
+        current_action_index=None,
+        current_action_label=None,
+        completed_action_count=None,
+        total_action_count=None,
+    ) -> None:
+        viewer = self._ensure_viewer_started()
+        if viewer is None:
+            return
+        try:
+            viewer.set_current_action(current_action_index, current_action_label)
+            if hasattr(viewer, 'set_action_progress'):
+                viewer.set_action_progress(
+                    completed_action_count=completed_action_count,
+                    total_action_count=total_action_count,
+                )
+        except Exception:
+            pass
+
+    def set_live_scene_state(
+        self,
+        snapshot: SegmentationSnapshot,
+        *,
+        label: str = '',
+        desired: str = '',
+        held_object=None,
+        failure_event=None,
+        scene_state_info=None,
+        completed_action_count=None,
+        total_action_count=None,
+    ) -> None:
+        viewer = self._ensure_viewer_started()
+        if viewer is None:
+            return
+        try:
+            if hasattr(viewer, 'set_scene_state'):
+                viewer.set_scene_state(
+                    snapshot=snapshot,
+                    label=label,
+                    desired=desired,
+                    held_object=held_object,
+                    failure_event=failure_event,
+                    scene_state_info=scene_state_info,
+                    completed_action_count=completed_action_count,
+                    total_action_count=total_action_count,
+                )
+            viewer.update()
+        except Exception:
+            pass
+
     def shutdown(self) -> None:
         if self.viewer is not None:
             try:
@@ -332,21 +383,33 @@ class SegmentationEvidenceAdapter:
 
         return resolve_object_regions(pose_map, region_map, valid_regions)
 
-    def is_lid_open(self, snapshot: SegmentationSnapshot) -> bool:
+    def is_lid_open(self, snapshot: SegmentationSnapshot, lid_name: str = 'box_lid') -> bool:
+        lid_name = lid_name or 'box_lid'
+        if lid_name == 'grill_lid' and self.env is not None:
+            try:
+                from llm_pipeline.grill_geometry import infer_grill_lid_open
+                inferred = infer_grill_lid_open(self.env)
+                if inferred is not None:
+                    return bool(inferred)
+            except Exception:
+                pass
+
         if self.env is not None:
             try:
-                lid_obj = self.env.get_object('box_lid')
+                lid_obj = self.env.get_object(lid_name)
                 box_obj = self.env.get_object('box_base')
-                if lid_obj is not None and box_obj is not None:
+                if lid_name == 'box_lid' and lid_obj is not None and box_obj is not None:
                     lid_pos = lid_obj.get_position()
                     box_pos = box_obj.get_position()
                     return abs(float(lid_pos[0]) - float(box_pos[0])) > 0.10
             except Exception:
                 pass
 
-        lid_evidence = snapshot.object_evidence.get('box_lid')
+        lid_evidence = snapshot.object_evidence.get(lid_name)
         if lid_evidence is None or not lid_evidence.visible:
             return False
+        if lid_name == 'grill_lid':
+            return 'inside_grill' not in set(lid_evidence.mask_regions)
         mask_regions = set(lid_evidence.mask_regions)
         return bool(mask_regions) and BOX_LID_TOP_REGION not in mask_regions and BOX_STORAGE_REGION not in mask_regions
 
@@ -382,7 +445,7 @@ class SegmentationEvidenceAdapter:
             if viewer_cls is None:
                 continue
             try:
-                viewer = viewer_cls(self.env)
+                viewer = viewer_cls(self.env, detector=self.detector)
                 viewer.start()
                 self.viewer = viewer
                 return self.viewer

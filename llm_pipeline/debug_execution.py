@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import math
 import os
 import re
@@ -28,6 +29,7 @@ from llm_pipeline.executable_symbols import build_runtime_symbol_registry
 from llm_pipeline.pipeline_types import (
     DirectAction,
     FailureEvent,
+    FailureLayer,
     FailureSource,
     FailureStage,
     PlanResult,
@@ -35,6 +37,7 @@ from llm_pipeline.pipeline_types import (
     SegmentationObjectEvidence,
     SegmentationSnapshot,
 )
+from llm_pipeline.strict_parser import StrictParseError
 
 
 ACTION_LINE = re.compile(r"^(move|pick|open|close)\(([^,)]+)\)$|^place\(([^,]+),\s*([^)]+)\)$|^move$")
@@ -46,10 +49,19 @@ PROGRESS_KEYS = {
     "last_exit_code",
     "last_success",
     "completed_actions",
+    "completed_action_trace",
     "last_completed_action",
+    "remaining_actions",
+    "remaining_action_trace",
     "failure_id",
+    "failure_layer",
+    "failure_stage",
     "failure_source",
+    "failure_action",
+    "failure_should_replan",
     "failure_message",
+    "failure_reason",
+    "failure_evidence",
 }
 
 
@@ -66,13 +78,46 @@ class MockPlanner:
     def __init__(self, actions: Iterable[DirectAction]):
         self.actions = list(actions)
         self.loaded = True
+        self.parser = None
 
     def plan(self, bundle):
         del bundle
+        raw_output = "\n".join(
+            "move" if action.action_name == "move" else str(action)
+            for action in self.actions
+        )
+        if self.parser is not None:
+            try:
+                parsed_actions = self.parser.parse(raw_output)
+            except StrictParseError as exc:
+                return PlanResult(
+                    success=False,
+                    actions=[],
+                    raw_output=raw_output,
+                    inference_time=0.0,
+                    error_message=str(exc),
+                    failure_event=FailureEvent(
+                        failure_id=exc.failure_id,
+                        stage=FailureStage.BEFORE_EXECUTION,
+                        source=FailureSource.VALIDATION,
+                        action=None,
+                        evidence={"line_number": exc.line_number, "raw_output": raw_output},
+                        failure_layer=FailureLayer.LAYER_1,
+                        should_replan=(exc.failure_id == "missing_preceding_move"),
+                        message=str(exc),
+                    ),
+                )
+            return PlanResult(
+                success=True,
+                actions=parsed_actions,
+                raw_output=raw_output,
+                inference_time=0.0,
+            )
+
         return PlanResult(
             success=True,
             actions=list(self.actions),
-            raw_output="\n".join(str(action) for action in self.actions),
+            raw_output=raw_output,
             inference_time=0.0,
         )
 
@@ -199,6 +244,7 @@ class ExecutorOnlyFailureChecker:
             source=FailureSource.EXECUTOR,
             action=str(action),
             evidence={"error": error_message},
+            failure_layer=FailureLayer.LAYER_1,
             should_replan=False,
             message=error_message,
         )
@@ -392,7 +438,7 @@ def _sequence_from_block(
 
 def load_sequences(path: Path, default_variant: str) -> List[DebugSequence]:
     blocks: List[List[tuple[int, str]]] = [[]]
-    for line_number, raw_line in enumerate(path.read_text().splitlines(), start=1):
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -622,6 +668,10 @@ def run_pipeline_sequence(
         task_family=spec.task_family,
         scene_path=spec.scene_path,
         live_segmentation_view=bool(live_masks and not headless),
+        # In debug replay the viewer is checkpoint-driven: masks/state refresh
+        # before/after primitives and bundles, not on every simulator step.
+        live_view_update_stride=1_000_000,
+        scene_state_trace=bool(use_scene_state),
     )
     segmentation_adapter = None
     failure_checker = None
@@ -699,33 +749,69 @@ def _progress_metadata(sequence: DebugSequence, result: Optional[dict], status: 
         return lines
 
     completed = list(result.get("completed_actions", []))
+    remaining = list(result.get("remaining_actions", []))
     success = bool(result.get("success", False))
     lines.extend(
         [
             f"last_exit_code: {0 if success else 1}",
             f"last_success: {success}",
             f"completed_actions: {len(completed)}/{len(sequence.actions)}",
-            f"last_completed_action: {completed[-1] if completed else ''}",
+            f"completed_action_trace: {_metadata_value(' | '.join(str(action) for action in completed))}",
+            f"last_completed_action: {_metadata_value(completed[-1] if completed else '')}",
+            f"remaining_actions: {len(remaining)}",
+            f"remaining_action_trace: {_metadata_value(' | '.join(str(action) for action in remaining))}",
         ]
     )
     failure_event = result.get("last_failure_event") or {}
     if failure_event:
         lines.extend(
             [
-                f"failure_id: {failure_event.get('failure_id', '')}",
-                f"failure_source: {failure_event.get('source', '')}",
-                f"failure_message: {failure_event.get('message', '')}",
+                f"failure_id: {_metadata_value(failure_event.get('failure_id', ''))}",
+                f"failure_layer: {_metadata_value(failure_event.get('failure_layer', ''))}",
+                f"failure_stage: {_metadata_value(failure_event.get('stage', ''))}",
+                f"failure_source: {_metadata_value(failure_event.get('source', ''))}",
+                f"failure_action: {_metadata_value(failure_event.get('action', ''))}",
+                f"failure_should_replan: {bool(failure_event.get('should_replan', False))}",
+                f"failure_message: {_metadata_value(failure_event.get('message', ''))}",
+                f"failure_reason: {_metadata_value(result.get('failure_reason', ''))}",
+                f"failure_evidence: {_metadata_json(failure_event.get('evidence', {}))}",
             ]
         )
     else:
         lines.extend(
             [
                 "failure_id: ",
+                "failure_layer: ",
+                "failure_stage: ",
                 "failure_source: ",
+                "failure_action: ",
+                "failure_should_replan: False",
                 "failure_message: ",
+                "failure_reason: ",
+                "failure_evidence: {}",
             ]
         )
     return lines
+
+
+def _metadata_value(value) -> str:
+    if value is None:
+        return ""
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()
+    text = (
+        text
+        .replace("→", "->")
+        .replace("←", "<-")
+        .replace("✓", "ok")
+    )
+    return text.encode("ascii", errors="replace").decode("ascii")
+
+
+def _metadata_json(value) -> str:
+    try:
+        return _metadata_value(json.dumps(value or {}, sort_keys=True, default=str))
+    except Exception:
+        return _metadata_value(value)
 
 
 def _line_key(line: str) -> str:
@@ -743,7 +829,7 @@ def _update_sequence_file_progress(
     if path is None or not path.exists():
         return
 
-    lines = path.read_text().splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     blocks: List[tuple[int, int]] = []
     start = 0
     for index, line in enumerate(lines):
@@ -779,16 +865,12 @@ def _update_sequence_file_progress(
         if _line_key(line) not in PROGRESS_KEYS
     ]
 
-    insert_at = 0
-    for index, line in enumerate(block):
-        key = _line_key(line)
-        if key in {"name", "variant", "goal"}:
-            insert_at = index + 1
+    insert_at = len(block)
 
     progress_lines = _progress_metadata(sequence, result=result, status=status)
     updated_block = block[:insert_at] + progress_lines + block[insert_at:]
     updated_lines = lines[:start] + updated_block + lines[end:]
-    path.write_text("\n".join(updated_lines).rstrip() + "\n")
+    path.write_text("\n".join(updated_lines).rstrip() + "\n", encoding="utf-8")
 
 
 def _select_sequences(args: argparse.Namespace) -> List[DebugSequence]:
@@ -911,6 +993,7 @@ def main() -> int:
                 "completed_actions": [],
                 "last_failure_event": {
                     "failure_id": "DEBUG_EXECUTION_ERROR",
+                    "failure_layer": "layer_1",
                     "source": "debug_execution",
                     "message": str(exc),
                 },
@@ -929,6 +1012,7 @@ def main() -> int:
         if result.get("last_failure_event"):
             failure_event = result["last_failure_event"]
             print(f"Failure ID: {failure_event.get('failure_id')}")
+            print(f"Failure Layer: {failure_event.get('failure_layer')}")
             print(f"Failure Source: {failure_event.get('source')}")
             print(f"Failure Message: {failure_event.get('message')}")
         else:

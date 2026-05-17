@@ -82,6 +82,19 @@ def normalize_region_name(region_name: str | None) -> str:
     return GRILL_REGION_ALIASES.get(canonical, canonical)
 
 
+def regions_match_for_target(observed_region: str | None, target_region: str | None) -> bool:
+    """Return whether an observed region satisfies the requested target region."""
+    observed = normalize_region_name(observed_region)
+    target = normalize_region_name(target_region)
+    if observed == target:
+        return True
+    if target == "placement_boundary" and observed in {"table", "groceries_boundary"}:
+        return True
+    if target == BOX_STORAGE_REGION and observed == BOX_INSIDE_FALLBACK_REGION:
+        return True
+    return False
+
+
 def region_semantics(region_name: str | None) -> str:
     canonical = normalize_region_name(region_name)
     return REGION_SEMANTICS.get(canonical, "")
